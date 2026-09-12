@@ -35,6 +35,13 @@ If dependency versions have advanced, create a current Expo project using `npx c
 - Camera QR scanning requested only while the scanner is opened
 - Self-scan, expired-code and duplicate-connection protection
 - Pending connections stored locally without contact details
+- Persistent activity groups and join-approval requests
+- Women-only and trusted-member-only group controls
+- Women-only local safety ratings
+
+## Prototype boundary
+
+This build demonstrates the product rules locally. Gender/face verification, cross-device discovery, moderation investigations, bans and private messaging require a secure backend before public release. Self-declared gender must not be treated as verification in production.
 
 ## Trust rules
 
@@ -56,4 +63,4 @@ If dependency versions have advanced, create a current Expo project using `npx c
 
 ## Next milestone
 
-Add Supabase authentication and database tables for profiles, hangouts, join requests and memberships. Do not add chat or maps until access-control rules are tested.
+Add a small secure backend for authentication, cross-device group discovery and verified moderation. Do not add chat or maps until access-control rules are tested.
