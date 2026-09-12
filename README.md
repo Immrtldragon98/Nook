@@ -11,6 +11,8 @@ An activity-first friendship app for India. People discover small, intentional p
 
 For cloud mode, copy `.env.example` to `.env` and add the dedicated Nook Supabase URL and publishable key. Never put a secret or service-role key in the Android app.
 
+Dedicated free project: `wjuwshaexqigxlzmtnkz` in Mumbai (`ap-south-1`). The API URL is `https://wjuwshaexqigxlzmtnkz.supabase.co`; retrieve its publishable key from the Supabase Connect screen and keep it in the ignored `.env` file.
+
 If dependency versions have advanced, create a current Expo project using `npx create-expo-app@latest`, then replace its `App.tsx` with the one here.
 
 ## Included in this prototype
@@ -73,4 +75,4 @@ This build demonstrates the product rules locally. Gender/face verification, cro
 
 ## Next milestone
 
-Create a dedicated Nook Supabase project, apply `supabase/schema.sql`, run Security Advisor, configure `.env`, and verify the two-phone join/approval flow. Do not add chat or maps until access-control rules are tested.
+Configure `.env` on the development machine and verify the two-phone signup, group join and host-approval flow. Do not add chat or maps until access-control rules are tested.
