@@ -998,3 +998,1148 @@ function LocalGroups() {
           onPress={() => setCreating(true)}
           style={styles.smallAdd}
         >
+          <Text style={styles.primaryText}>＋ Group</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.genderBox}>
+        <Text style={styles.safetyTitle}>Safety-rating eligibility</Text>
+        <Text style={styles.meta}>
+          Choose locally. Verification will be added before public release.
+        </Text>
+        <View style={styles.wrap}>
+          {[
+            ["woman", "Woman"],
+            ["man", "Man"],
+            ["prefer_not_to_say", "Prefer not to say"],
+          ].map(([v, l]) => (
+            <TouchableOpacity
+              key={v}
+              onPress={async () => {
+                await setGender(db, v);
+                setGenderState(v);
+              }}
+              style={[styles.chip, gender === v && styles.chipActive]}
+            >
+              <Text
+                style={[styles.chipText, gender === v && styles.chipTextActive]}
+              >
+                {l}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+      {groups.length === 0 ? (
+        <Empty
+          emoji="🫶"
+          title="Create the first local group"
+          body="Sports, trips, restaurant hopping, shopping or a women-only circle."
+          action="Use + Group above"
+        />
+      ) : (
+        groups.map((g) => {
+          const owned = ownedIds.includes(g.id);
+          const membership = memberships.find((m) => m.group_id === g.id);
+          const score = g.safety_count ? g.safety_total / g.safety_count : 0;
+          return (
+            <View key={g.id} style={styles.card}>
+              <View style={styles.cardTop}>
+                <View style={styles.icon}>
+                  <Text style={styles.iconText}>
+                    {g.category.toLowerCase().includes("sport")
+                      ? "🏸"
+                      : g.category.toLowerCase().includes("travel")
+                        ? "🧳"
+                        : "✨"}
+                  </Text>
+                </View>
+                <View style={styles.pill}>
+                  <Text style={styles.pillText}>
+                    {score ? `★ ${score.toFixed(1)} safety` : "New group"}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.cardTitle}>{g.title}</Text>
+              <Text style={styles.audience}>
+                {owned
+                  ? "You host this group"
+                  : g.women_only
+                    ? "Verified women only"
+                    : g.trusted_only
+                      ? "Trusted members only"
+                      : "Open group"}
+              </Text>
+              <Text style={styles.meta}>{g.description || g.category}</Text>
+              <Text style={styles.meta}>
+                📍 {g.area} · {g.language}
+              </Text>
+              <View style={styles.cardBottom}>
+                <TouchableOpacity onPress={() => rate(g, 5)}>
+                  <Text style={styles.rateText}>Rate safety ★</Text>
+                </TouchableOpacity>
+                {owned ? (
+                  <TouchableOpacity
+                    onPress={() => setManaging(g)}
+                    style={styles.manageButton}
+                  >
+                    <Text style={styles.primaryText}>Manage</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    disabled={!!membership}
+                    onPress={() => join(g)}
+                    style={[styles.join, membership && styles.joined]}
+                  >
+                    <Text style={styles.joinText}>
+                      {membership ? "Approval pending" : "Ask to join"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          );
+        })
+      )}
+      <View style={{ height: 92 }} />
+    </ScrollView>
+  );
+}
+
+function HostConsole({
+  group,
+  onClose,
+}: {
+  group: StoredGroup;
+  onClose: () => Promise<void>;
+}) {
+  const db = useSQLiteContext();
+  const [requests, setRequests] = useState<HostRequest[]>([]);
+  const [moderation, setModeration] = useState<ModerationState | null>(null);
+  async function refresh() {
+    setRequests(await listHostRequests(db, group.id));
+    setModeration((await getModerationState(db, group.id)) ?? null);
+  }
+  useEffect(() => {
+    refresh();
+  }, []);
+  async function act(id: number, status: HostRequest["status"]) {
+    await updateHostRequest(db, id, status);
+    await refresh();
+  }
+  return (
+    <ScrollView contentContainerStyle={styles.page}>
+      <Text style={styles.eyebrow}>HOST CONSOLE</Text>
+      <Text style={styles.h1}>{group.title}</Text>
+      <View
+        style={[
+          styles.reviewBox,
+          moderation?.status === "restricted" && styles.restrictedBox,
+        ]}
+      >
+        <Text style={styles.kindTitle}>
+          Status: {moderation?.status.replace("_", " ") ?? "clear"}
+        </Text>
+        <Text style={styles.meta}>
+          {moderation?.report_count ?? 0} report(s). Low ratings and reports
+          open a review; they never permanently ban automatically.
+        </Text>
+        {moderation?.restriction_until && (
+          <Text style={styles.meta}>
+            Restricted until{" "}
+            {new Date(moderation.restriction_until).toLocaleDateString()}
+          </Text>
+        )}
+        <View style={styles.wrap}>
+          <TouchableOpacity
+            onPress={async () => {
+              await reportGroup(db, group.id);
+              await refresh();
+            }}
+            style={styles.miniButton}
+          >
+            <Text style={styles.editText}>Open review</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={async () => {
+              await restrictGroup(db, group.id, 7);
+              await refresh();
+            }}
+            style={styles.dangerButton}
+          >
+            <Text style={styles.primaryText}>Restrict 7 days</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={async () => {
+              await clearGroupReview(db, group.id);
+              await refresh();
+            }}
+            style={styles.miniButton}
+          >
+            <Text style={styles.editText}>Clear review</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      <View style={styles.sectionRow}>
+        <Text style={styles.sectionTitle}>Join requests</Text>
+        <TouchableOpacity
+          onPress={async () => {
+            await addTestHostRequest(db, group.id);
+            await refresh();
+          }}
+        >
+          <Text style={styles.rateText}>＋ Test request</Text>
+        </TouchableOpacity>
+      </View>
+      {requests.length === 0 ? (
+        <Text style={styles.meta}>
+          No requests yet. “Test request” previews the approval flow on this
+          local build.
+        </Text>
+      ) : (
+        requests.map((r) => (
+          <View key={r.id} style={styles.memberRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.kindTitle}>{r.display_name}</Text>
+              <Text style={styles.meta}>
+                {r.account_code} · {r.trusted ? "Trusted" : "Not trusted"} ·{" "}
+                {r.status}
+              </Text>
+            </View>
+            {r.status === "pending" ? (
+              <View style={styles.memberActions}>
+                <TouchableOpacity
+                  onPress={() => act(r.id, "approved")}
+                  style={styles.approveButton}
+                >
+                  <Text style={styles.primaryText}>Approve</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => act(r.id, "rejected")}
+                  style={styles.miniButton}
+                >
+                  <Text style={styles.editText}>Reject</Text>
+                </TouchableOpacity>
+              </View>
+            ) : r.status === "approved" ? (
+              <View style={styles.memberActions}>
+                <TouchableOpacity
+                  onPress={() => act(r.id, "removed")}
+                  style={styles.miniButton}
+                >
+                  <Text style={styles.editText}>Remove</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => act(r.id, "blocked")}
+                  style={styles.dangerButton}
+                >
+                  <Text style={styles.primaryText}>Block</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        ))
+      )}
+      <TouchableOpacity onPress={onClose} style={styles.primaryWide}>
+        <Text style={styles.primaryText}>Done</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+function Toggle({
+  label,
+  detail,
+  value,
+  onPress,
+}: {
+  label: string;
+  detail: string;
+  value: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity onPress={onPress} style={styles.toggleRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.kindTitle}>{label}</Text>
+        <Text style={styles.meta}>{detail}</Text>
+      </View>
+      <View style={[styles.toggle, value && styles.toggleOn]}>
+        <View style={[styles.toggleDot, value && styles.toggleDotOn]} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function Plans({ joined }: { joined: number[] }) {
+  const plans = hangouts.filter((h) => joined.includes(h.id));
+  return (
+    <ScrollView contentContainerStyle={styles.page}>
+      <Text style={styles.h1}>Your plans</Text>
+      <Text style={styles.intro}>
+        Requests and confirmed meetups appear here.
+      </Text>
+      {plans.length ? (
+        plans.map((h) => (
+          <View key={h.id} style={styles.card}>
+            <Text style={styles.cardTitle}>
+              {h.emoji} {h.title}
+            </Text>
+            <Text style={styles.meta}>
+              {h.time} · {h.area}
+            </Text>
+            <View style={styles.pending}>
+              <Text style={styles.pendingText}>Waiting for host approval</Text>
+            </View>
+          </View>
+        ))
+      ) : (
+        <Empty
+          emoji="☀"
+          title="Nothing planned yet"
+          body="Discover a hangout and ask to join. Your exact location is never shared publicly."
+          action="Browse activities"
+        />
+      )}
+    </ScrollView>
+  );
+}
+
+function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
+  const db = useSQLiteContext();
+  const [name, setName] = useState("");
+  const [city, setCity] = useState("Bengaluru");
+  const [zone, setZone] = useState("");
+  const [languages, setLanguages] = useState("English");
+  const [interests, setInterests] = useState("");
+  const [bio, setBio] = useState("");
+  async function submit() {
+    if (!name.trim() || !zone.trim() || !interests.trim())
+      return Alert.alert("Almost there", "Add your name, area and interests.");
+    await saveProfile(db, { name, city, zone, languages, interests, bio });
+    await onDone();
+  }
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.page}>
+        <Text style={styles.eyebrow}>LOCAL PROFILE</Text>
+        <Text style={styles.h1}>What brings you outside?</Text>
+        <Text style={styles.intro}>
+          This stays on your phone for now. Share only what helps others
+          understand the activity.
+        </Text>
+        <Field
+          label="First name"
+          value={name}
+          onChangeText={setName}
+          placeholder="Yadhu"
+        />
+        <Field
+          label="City"
+          value={city}
+          onChangeText={setCity}
+          placeholder="Bengaluru"
+        />
+        <Field
+          label="Approximate area"
+          value={zone}
+          onChangeText={setZone}
+          placeholder="Indiranagar"
+        />
+        <Field
+          label="Languages"
+          value={languages}
+          onChangeText={setLanguages}
+          placeholder="English · Malayalam"
+        />
+        <Field
+          label="Interests"
+          value={interests}
+          onChangeText={setInterests}
+          placeholder="Badminton, food, drawing"
+        />
+        <Field
+          label="Short bio (optional)"
+          value={bio}
+          onChangeText={setBio}
+          placeholder="New to the city and looking for weekend plans"
+        />
+        <TouchableOpacity onPress={submit} style={styles.primaryWide}>
+          <Text style={styles.primaryText}>Create local profile</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function Profile({
+  profile,
+  onEdit,
+}: {
+  profile: LocalProfile;
+  onEdit: () => void;
+}) {
+  const initial = profile.name.slice(0, 1).toUpperCase();
+  const [mode, setMode] = useState<"profile" | "show" | "scan">("profile");
+  const [nonce, setNonce] = useState(Crypto.randomUUID());
+  const expiry = Date.now() + 5 * 60 * 1000;
+  const payload = JSON.stringify({
+    v: 1,
+    type: "nook-connect",
+    account: profile.account_code,
+    name: profile.name,
+    exp: expiry,
+    nonce,
+  });
+  if (mode === "show")
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.qrScreen}>
+          <Text style={styles.h1}>Connect in person</Text>
+          <Text style={styles.intro}>
+            Ask the other person to scan this within 5 minutes.
+          </Text>
+          <QRCodeMatrix value={payload} />
+          <Text style={styles.accountCode}>{profile.account_code}</Text>
+          <Text style={styles.qrCopy}>
+            No phone number or contact list is shared.
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              setNonce(Crypto.randomUUID());
+              setMode("profile");
+            }}
+            style={styles.primaryWide}
+          >
+            <Text style={styles.primaryText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  if (mode === "scan")
+    return (
+      <QRScanner
+        ownCode={profile.account_code}
+        onClose={() => setMode("profile")}
+      />
+    );
+  return (
+    <ScrollView contentContainerStyle={styles.page}>
+      <Text style={styles.h1}>Your colourful corner</Text>
+      <View style={styles.profileCard}>
+        <View style={styles.profileGlow}>
+          <View style={styles.bigAvatar}>
+            <Text style={styles.bigAvatarText}>{initial}</Text>
+          </View>
+          <View style={styles.verified}>
+            <Text style={styles.verifiedText}>Local profile</Text>
+          </View>
+        </View>
+        <Text style={styles.profileName}>{profile.name}</Text>
+        <Text style={styles.profileBio}>
+          {profile.bio || "Ready for a real plan, not endless chatting"}
+        </Text>
+        <Text style={styles.profileLocation}>
+          📍 {profile.zone}, {profile.city} · {profile.languages}
+        </Text>
+        <View style={styles.qr}>
+          <Text style={styles.qrMark}>▦</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.qrTitle}>Private connection</Text>
+            <Text style={styles.accountCode}>{profile.account_code}</Text>
+            <Text style={styles.qrCopy}>
+              Use a rotating QR after meeting. Your phone number stays private.
+            </Text>
+          </View>
+        </View>
+        <View style={styles.qrActions}>
+          <TouchableOpacity
+            onPress={() => setMode("show")}
+            style={styles.qrAction}
+          >
+            <Text style={styles.qrActionText}>Show my QR</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setMode("scan")}
+            style={styles.qrActionAlt}
+          >
+            <Text style={styles.qrActionAltText}>Scan QR</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      <Text style={styles.sectionTitle}>My vibe</Text>
+      <View style={styles.wrap}>
+        {profile.interests.split(",").map((x) => (
+          <View key={x} style={styles.colorChip}>
+            <Text style={styles.colorChipText}>{x.trim()}</Text>
+          </View>
+        ))}
+      </View>
+      <TouchableOpacity onPress={onEdit} style={styles.editButton}>
+        <Text style={styles.editText}>Edit local profile</Text>
+      </TouchableOpacity>
+      <View style={styles.safety}>
+        <Text style={styles.safetyTitle}>Trust & privacy</Text>
+        <Text style={styles.meta}>
+          A scan creates a pending local connection. It does not reveal contact
+          details or prove global identity.
+        </Text>
+      </View>
+    </ScrollView>
+  );
+}
+
+function QRScanner({
+  ownCode,
+  onClose,
+}: {
+  ownCode: string;
+  onClose: () => void;
+}) {
+  const db = useSQLiteContext();
+  const [permission, requestPermission] = useCameraPermissions();
+  const [locked, setLocked] = useState(false);
+  async function scanned({ data }: { data: string }) {
+    if (locked) return;
+    setLocked(true);
+    try {
+      const p = JSON.parse(data);
+      if (
+        p.type !== "nook-connect" ||
+        p.v !== 1 ||
+        !p.account ||
+        !p.name ||
+        !p.exp
+      )
+        throw new Error("format");
+      if (p.account === ownCode)
+        return Alert.alert(
+          "That is your QR",
+          "Ask the other person to show theirs.",
+        );
+      if (Date.now() > p.exp)
+        return Alert.alert("QR expired", "Ask them to generate a new QR.");
+      if (await hasConnection(db, p.account))
+        return Alert.alert(
+          "Already connected",
+          "This account is already on your phone.",
+        );
+      Alert.alert(
+        `Connect with ${p.name}?`,
+        "This creates a pending connection. No contact details will be shared.",
+        [
+          { text: "Cancel", style: "cancel", onPress: () => setLocked(false) },
+          {
+            text: "Add pending",
+            onPress: async () => {
+              await addPendingConnection(db, p.account, p.name);
+              Alert.alert("Pending connection saved");
+              onClose();
+            },
+          },
+        ],
+      );
+    } catch {
+      Alert.alert(
+        "Not a Nook QR",
+        "Ask the person to open their connection QR.",
+        [{ text: "Try again", onPress: () => setLocked(false) }],
+      );
+    }
+  }
+  if (!permission) return <SafeAreaView style={styles.safe} />;
+  if (!permission.granted)
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.qrScreen}>
+          <Text style={styles.h1}>Scan connection QR</Text>
+          <Text style={styles.intro}>
+            Camera access is used only while this scanner is open.
+          </Text>
+          <TouchableOpacity
+            onPress={requestPermission}
+            style={styles.primaryWide}
+          >
+            <Text style={styles.primaryText}>Allow camera</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onClose} style={styles.editButton}>
+            <Text style={styles.editText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  return (
+    <SafeAreaView style={styles.scanner}>
+      <CameraView
+        style={StyleSheet.absoluteFill}
+        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+        onBarcodeScanned={scanned}
+      />
+      <View style={styles.scanOverlay}>
+        <Text style={styles.scanTitle}>Scan Nook QR</Text>
+        <View style={styles.scanFrame} />
+        <TouchableOpacity onPress={onClose} style={styles.scanClose}>
+          <Text style={styles.primaryText}>Close scanner</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function Empty({
+  emoji,
+  title,
+  body,
+  action,
+}: {
+  emoji: string;
+  title: string;
+  body: string;
+  action: string;
+}) {
+  return (
+    <View style={styles.empty}>
+      <Text style={styles.emptyEmoji}>{emoji}</Text>
+      <Text style={styles.cardTitle}>{title}</Text>
+      <Text style={[styles.meta, { textAlign: "center" }]}>{body}</Text>
+      <TouchableOpacity style={styles.primary}>
+        <Text style={styles.primaryText}>{action}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function Nav({
+  active,
+  onChange,
+}: {
+  active: Tab;
+  onChange: (tab: Tab) => void;
+}) {
+  const items: { name: Tab; icon: string }[] = [
+    { name: "Discover", icon: "⌂" },
+    { name: "Groups", icon: "◎" },
+    { name: "Create", icon: "＋" },
+    { name: "Plans", icon: "◷" },
+    { name: "Profile", icon: "○" },
+  ];
+  return (
+    <View style={styles.nav}>
+      {items.map((i) => (
+        <TouchableOpacity
+          key={i.name}
+          style={styles.navItem}
+          onPress={() => onChange(i.name)}
+        >
+          <Text style={[styles.navIcon, active === i.name && styles.navActive]}>
+            {i.icon}
+          </Text>
+          <Text style={[styles.navText, active === i.name && styles.navActive]}>
+            {i.name}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: "#F8F6EF" },
+  shell: { flex: 1 },
+  page: { padding: 20, paddingTop: 24 },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  eyebrow: {
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 1.4,
+    color: "#247064",
+    marginBottom: 8,
+  },
+  h1: {
+    fontSize: 34,
+    lineHeight: 39,
+    fontWeight: "800",
+    color: "#17211F",
+    letterSpacing: -1,
+  },
+  intro: { fontSize: 16, color: "#68716D", marginTop: 8, marginBottom: 22 },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#F0AF49",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: { fontWeight: "800", fontSize: 17, color: "#17211F" },
+  chips: { gap: 9, paddingBottom: 22 },
+  chip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 22,
+    backgroundColor: "#ECEAE3",
+  },
+  chipActive: { backgroundColor: "#247064" },
+  chipText: { fontWeight: "700", color: "#4F5955" },
+  chipTextActive: { color: "white" },
+  sectionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#17211F",
+    marginVertical: 14,
+  },
+  muted: { fontSize: 12, color: "#8A918E" },
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 22,
+    padding: 18,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#ECEAE3",
+  },
+  cardTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  icon: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: "#F4F1E8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconText: { fontSize: 23 },
+  pill: {
+    backgroundColor: "#E3F2EC",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  pillText: { color: "#247064", fontWeight: "800", fontSize: 12 },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#17211F",
+    marginBottom: 7,
+  },
+  meta: { fontSize: 14, lineHeight: 21, color: "#68716D" },
+  cardBottom: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 16,
+  },
+  host: { fontSize: 13, fontWeight: "600", color: "#68716D" },
+  join: {
+    backgroundColor: "#E76F51",
+    paddingHorizontal: 15,
+    paddingVertical: 11,
+    borderRadius: 14,
+  },
+  joined: { backgroundColor: "#82908B" },
+  joinText: { color: "white", fontWeight: "800" },
+  nav: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 10,
+    height: 70,
+    backgroundColor: "#17211F",
+    borderRadius: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    paddingHorizontal: 7,
+  },
+  navItem: { alignItems: "center", minWidth: 65 },
+  navIcon: { fontSize: 21, color: "#8FA09A" },
+  navText: { fontSize: 10, fontWeight: "700", marginTop: 3, color: "#8FA09A" },
+  navActive: { color: "#F0AF49" },
+  empty: { marginTop: 70, alignItems: "center", paddingHorizontal: 28 },
+  emptyEmoji: { fontSize: 42, marginBottom: 18 },
+  primary: {
+    backgroundColor: "#247064",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 16,
+    marginTop: 22,
+  },
+  primaryText: { color: "white", fontWeight: "800" },
+  pending: {
+    alignSelf: "flex-start",
+    marginTop: 14,
+    padding: 9,
+    borderRadius: 10,
+    backgroundColor: "#FFF1D8",
+  },
+  pendingText: { fontSize: 12, fontWeight: "700", color: "#8B6226" },
+  profile: { alignItems: "center", paddingVertical: 28 },
+  bigAvatar: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: "#F0AF49",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 13,
+  },
+  bigAvatarText: { fontSize: 28, fontWeight: "800" },
+  wrap: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
+  safety: {
+    backgroundColor: "#E3F2EC",
+    borderRadius: 20,
+    padding: 18,
+    marginTop: 30,
+  },
+  safetyTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#247064",
+    marginBottom: 7,
+  },
+  audience: {
+    alignSelf: "flex-start",
+    backgroundColor: "#F5E8FF",
+    color: "#70408C",
+    fontSize: 11,
+    fontWeight: "800",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 9,
+    marginBottom: 8,
+  },
+  profileCard: {
+    backgroundColor: "#503A82",
+    borderRadius: 28,
+    padding: 22,
+    marginTop: 22,
+    overflow: "hidden",
+  },
+  profileGlow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  verified: {
+    backgroundColor: "#DDF7E8",
+    borderRadius: 13,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  verifiedText: { color: "#176448", fontWeight: "800", fontSize: 12 },
+  profileName: { fontSize: 28, fontWeight: "900", color: "white" },
+  profileBio: { fontSize: 15, color: "#E8DFFF", marginTop: 5 },
+  profileLocation: { fontSize: 13, color: "#D4C9F1", marginTop: 10 },
+  qr: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 13,
+  },
+  qrMark: { fontSize: 38, color: "#17211F" },
+  qrTitle: { fontSize: 15, fontWeight: "900", color: "#17211F" },
+  qrCopy: { fontSize: 11, lineHeight: 16, color: "#68716D", marginTop: 2 },
+  colorChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 22,
+    backgroundColor: "#FFE5B9",
+  },
+  colorChipText: { fontWeight: "800", color: "#6A4711" },
+  trustBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#E5F5ED",
+    padding: 14,
+    borderRadius: 18,
+    marginBottom: 18,
+  },
+  trustIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    textAlign: "center",
+    textAlignVertical: "center",
+    backgroundColor: "#247064",
+    color: "white",
+    fontWeight: "900",
+  },
+  trustTitle: { fontSize: 14, fontWeight: "900", color: "#174E45" },
+  trustCopy: { fontSize: 12, color: "#55716A", marginTop: 2 },
+  tripRules: {
+    backgroundColor: "#EEF0FF",
+    padding: 10,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  tripRulesText: { fontSize: 11, fontWeight: "700", color: "#4B4F83" },
+  tripJoin: { backgroundColor: "#4E56A6" },
+  kindRow: { flexDirection: "row", gap: 12 },
+  kindCard: {
+    flex: 1,
+    minHeight: 150,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2,
+    borderColor: "#ECEAE3",
+    borderRadius: 22,
+    padding: 16,
+  },
+  kindActive: { borderColor: "#247064", backgroundColor: "#F1FAF6" },
+  kindEmoji: { fontSize: 27, marginBottom: 13 },
+  kindTitle: { fontSize: 16, fontWeight: "900", color: "#17211F" },
+  kindCopy: { fontSize: 12, lineHeight: 17, color: "#68716D", marginTop: 5 },
+  formRow: {
+    height: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#ECEAE3",
+    paddingHorizontal: 13,
+  },
+  formNumber: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#ECEAE3",
+    textAlign: "center",
+    textAlignVertical: "center",
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#59615E",
+  },
+  formLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#28322F",
+    marginLeft: 11,
+  },
+  formArrow: { fontSize: 24, color: "#8A918E" },
+  primaryWide: {
+    backgroundColor: "#247064",
+    paddingVertical: 16,
+    borderRadius: 17,
+    alignItems: "center",
+    marginTop: 20,
+  },
+  tripHero: {
+    backgroundColor: "#4E56A6",
+    borderRadius: 22,
+    padding: 18,
+    marginTop: 20,
+  },
+  tripHeroTitle: { fontSize: 21, fontWeight: "900", color: "white" },
+  tripHeroText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: "#E6E8FF",
+    marginTop: 7,
+  },
+  tripWarning: {
+    backgroundColor: "#FFF1D8",
+    padding: 16,
+    borderRadius: 18,
+    marginTop: 18,
+  },
+  tripWarningTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#7B541C",
+    marginBottom: 5,
+  },
+  tripButton: { backgroundColor: "#4E56A6" },
+  field: { marginBottom: 13 },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#4F5955",
+    marginBottom: 6,
+  },
+  input: {
+    height: 50,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDDAD0",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    color: "#17211F",
+  },
+  requiredList: {
+    backgroundColor: "#EEF0FF",
+    padding: 15,
+    borderRadius: 16,
+    marginTop: 4,
+  },
+  requiredTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#4E56A6",
+    marginBottom: 4,
+  },
+  loading: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
+  accountCode: {
+    fontSize: 17,
+    fontWeight: "900",
+    letterSpacing: 1.5,
+    color: "#503A82",
+    marginTop: 3,
+  },
+  editButton: {
+    marginTop: 22,
+    borderWidth: 1,
+    borderColor: "#503A82",
+    paddingVertical: 13,
+    borderRadius: 15,
+    alignItems: "center",
+  },
+  editText: { fontWeight: "800", color: "#503A82" },
+  qrActions: { flexDirection: "row", gap: 10, marginTop: 14 },
+  qrAction: {
+    flex: 1,
+    backgroundColor: "#F0AF49",
+    padding: 13,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+  qrActionText: { fontWeight: "900", color: "#2C2417" },
+  qrActionAlt: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#D8CCF5",
+    padding: 13,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+  qrActionAltText: { fontWeight: "900", color: "white" },
+  qrScreen: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 28,
+  },
+  scanner: { flex: 1, backgroundColor: "#000" },
+  scanOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "space-around",
+    paddingVertical: 60,
+  },
+  scanTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "white",
+    backgroundColor: "#00000099",
+    padding: 12,
+    borderRadius: 12,
+  },
+  scanFrame: {
+    width: 245,
+    height: 245,
+    borderWidth: 4,
+    borderColor: "#F0AF49",
+    borderRadius: 24,
+  },
+  scanClose: {
+    backgroundColor: "#17211F",
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 16,
+  },
+  smallAdd: {
+    backgroundColor: "#247064",
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    borderRadius: 14,
+  },
+  genderBox: {
+    backgroundColor: "#E3F2EC",
+    padding: 15,
+    borderRadius: 18,
+    marginBottom: 16,
+  },
+  rateText: { color: "#70408C", fontWeight: "800" },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF",
+    padding: 15,
+    borderRadius: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#ECEAE3",
+  },
+  toggle: {
+    width: 46,
+    height: 27,
+    borderRadius: 14,
+    backgroundColor: "#C9CECC",
+    padding: 3,
+  },
+  toggleOn: { backgroundColor: "#247064" },
+  toggleDot: {
+    width: 21,
+    height: 21,
+    borderRadius: 11,
+    backgroundColor: "#FFF",
+  },
+  toggleDotOn: { marginLeft: 19 },
+  manageButton: {
+    backgroundColor: "#503A82",
+    paddingHorizontal: 17,
+    paddingVertical: 11,
+    borderRadius: 14,
+  },
+  reviewBox: {
+    backgroundColor: "#FFF1D8",
+    padding: 16,
+    borderRadius: 18,
+    marginVertical: 18,
+  },
+  restrictedBox: { backgroundColor: "#F9D9D5" },
+  miniButton: {
+    borderWidth: 1,
+    borderColor: "#503A82",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 12,
+  },
+  dangerButton: {
+    backgroundColor: "#B94A3B",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  memberRow: {
+    backgroundColor: "#FFF",
+    borderRadius: 17,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#ECEAE3",
+  },
+  memberActions: { flexDirection: "row", gap: 8, marginTop: 12 },
+  approveButton: {
+    backgroundColor: "#247064",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+});
