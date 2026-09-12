@@ -61,7 +61,7 @@ export async function migrateDatabase(db: SQLiteDatabase) {
 export async function getProfile(db: SQLiteDatabase) { return db.getFirstAsync<LocalProfile>('SELECT * FROM local_profile WHERE id=1'); }
 export async function saveProfile(db: SQLiteDatabase, p: Omit<LocalProfile,'id'|'account_code'>) {
   await db.runAsync(`INSERT INTO local_profile(id,account_code,name,city,zone,languages,interests,bio)
-    VALUES(1,'CG-' || upper(substr(hex(randomblob(8)),1,12)),?,?,?,?,?,?)
+    VALUES(1,'NK-' || upper(substr(hex(randomblob(8)),1,12)),?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET name=excluded.name,city=excluded.city,zone=excluded.zone,languages=excluded.languages,interests=excluded.interests,bio=excluded.bio`,
     p.name.trim(),p.city.trim(),p.zone.trim(),p.languages.trim(),p.interests.trim(),p.bio.trim());
 }
