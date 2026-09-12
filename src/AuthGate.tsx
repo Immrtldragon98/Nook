@@ -1,9 +1,139 @@
-import React,{useEffect,useState} from 'react';
-import { Alert,SafeAreaView,StyleSheet,Text,TextInput,TouchableOpacity,View } from 'react-native';
-import type { Session } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import React, { useEffect, useState } from "react";
+import {
+  Alert,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "./supabase";
 
-export function AuthGate({children}:{children:React.ReactNode}){const [session,setSession]=useState<Session|null|undefined>(undefined);useEffect(()=>{supabase.auth.getSession().then(({data})=>setSession(data.session));const {data}=supabase.auth.onAuthStateChange((_event,next)=>setSession(next));return()=>data.subscription.unsubscribe();},[]);if(session===undefined)return <Screen title="Opening Nook…"/>;if(!session)return <Auth/>;return <>{children}</>}
-function Auth(){const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [busy,setBusy]=useState(false);async function submit(mode:'in'|'up'){if(!email.trim()||password.length<8)return Alert.alert('Check details','Use a valid email and a password of at least 8 characters.');setBusy(true);const {error}=mode==='in'?await supabase.auth.signInWithPassword({email:email.trim(),password}):await supabase.auth.signUp({email:email.trim(),password});setBusy(false);if(error)Alert.alert('Could not continue',error.message);else if(mode==='up')Alert.alert('Check your email','Confirm your address, then return to Nook.');}return <SafeAreaView style={s.safe}><View style={s.card}><Text style={s.brand}>Nook</Text><Text style={s.title}>Meet through real plans.</Text><Text style={s.copy}>Your number stays private. Sign in to sync groups safely across phones.</Text><TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="Email" style={s.input}/><TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="Password (8+ characters)" style={s.input}/><TouchableOpacity disabled={busy} onPress={()=>submit('in')} style={s.primary}><Text style={s.primaryText}>{busy?'Please wait…':'Sign in'}</Text></TouchableOpacity><TouchableOpacity disabled={busy} onPress={()=>submit('up')} style={s.secondary}><Text style={s.secondaryText}>Create account</Text></TouchableOpacity></View></SafeAreaView>}
-function Screen({title}:{title:string}){return <SafeAreaView style={s.safe}><View style={s.card}><Text style={s.brand}>Nook</Text><Text style={s.title}>{title}</Text></View></SafeAreaView>}
-const s=StyleSheet.create({safe:{flex:1,backgroundColor:'#F8F6EF',justifyContent:'center'},card:{margin:22,padding:24,borderRadius:26,backgroundColor:'#FFF'},brand:{fontSize:16,fontWeight:'900',color:'#247064',letterSpacing:1},title:{fontSize:31,lineHeight:37,fontWeight:'900',color:'#17211F',marginTop:12},copy:{fontSize:15,lineHeight:22,color:'#68716D',marginVertical:18},input:{height:52,borderWidth:1,borderColor:'#DDDAD0',borderRadius:15,paddingHorizontal:14,marginBottom:12},primary:{backgroundColor:'#247064',padding:16,borderRadius:16,alignItems:'center'},primaryText:{color:'#FFF',fontWeight:'900'},secondary:{padding:15,alignItems:'center'},secondaryText:{color:'#503A82',fontWeight:'900'}});
+export function AuthGate({ children }: { children: React.ReactNode }) {
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data } = supabase.auth.onAuthStateChange((_event, next) =>
+      setSession(next),
+    );
+    return () => data.subscription.unsubscribe();
+  }, []);
+  if (session === undefined) return <Screen title="Opening Nook…" />;
+  if (!session) return <Auth />;
+  return <>{children}</>;
+}
+function Auth() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(mode: "in" | "up") {
+    if (!email.trim() || password.length < 8)
+      return Alert.alert(
+        "Check details",
+        "Use a valid email and a password of at least 8 characters.",
+      );
+    setBusy(true);
+    const { error } =
+      mode === "in"
+        ? await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          })
+        : await supabase.auth.signUp({ email: email.trim(), password });
+    setBusy(false);
+    if (error) Alert.alert("Could not continue", error.message);
+    else if (mode === "up")
+      Alert.alert(
+        "Check your email",
+        "Confirm your address, then return to Nook.",
+      );
+  }
+  return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.card}>
+        <Text style={s.brand}>Nook</Text>
+        <Text style={s.title}>Meet through real plans.</Text>
+        <Text style={s.copy}>
+          Your number stays private. Sign in to sync groups safely across
+          phones.
+        </Text>
+        <TextInput
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          placeholder="Email"
+          style={s.input}
+        />
+        <TextInput
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          placeholder="Password (8+ characters)"
+          style={s.input}
+        />
+        <TouchableOpacity
+          disabled={busy}
+          onPress={() => submit("in")}
+          style={s.primary}
+        >
+          <Text style={s.primaryText}>{busy ? "Please wait…" : "Sign in"}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          disabled={busy}
+          onPress={() => submit("up")}
+          style={s.secondary}
+        >
+          <Text style={s.secondaryText}>Create account</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+function Screen({ title }: { title: string }) {
+  return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.card}>
+        <Text style={s.brand}>Nook</Text>
+        <Text style={s.title}>{title}</Text>
+      </View>
+    </SafeAreaView>
+  );
+}
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: "#F8F6EF", justifyContent: "center" },
+  card: { margin: 22, padding: 24, borderRadius: 26, backgroundColor: "#FFF" },
+  brand: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#247064",
+    letterSpacing: 1,
+  },
+  title: {
+    fontSize: 31,
+    lineHeight: 37,
+    fontWeight: "900",
+    color: "#17211F",
+    marginTop: 12,
+  },
+  copy: { fontSize: 15, lineHeight: 22, color: "#68716D", marginVertical: 18 },
+  input: {
+    height: 52,
+    borderWidth: 1,
+    borderColor: "#DDDAD0",
+    borderRadius: 15,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  primary: {
+    backgroundColor: "#247064",
+    padding: 16,
+    borderRadius: 16,
+    alignItems: "center",
+  },
+  primaryText: { color: "#FFF", fontWeight: "900" },
+  secondary: { padding: 15, alignItems: "center" },
+  secondaryText: { color: "#503A82", fontWeight: "900" },
+});
