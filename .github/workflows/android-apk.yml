@@ -1,0 +1,61 @@
+name: Build Android test APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "App.tsx"
+      - "app.json"
+      - "package.json"
+      - "package-lock.json"
+      - "src/**"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nook-test-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate TypeScript
+        run: npm run check
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --no-install --clean
+      - name: Build installable debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Name APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Nook-test.apk
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nook-test-apk
+          path: Nook-test.apk
+          retention-days: 30
+      - name: Publish stable test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f nook-test-latest
+          git push origin refs/tags/nook-test-latest --force
+          gh release view nook-test-latest >/dev/null 2>&1 || gh release create nook-test-latest --title "Nook Android test build" --notes "Friends-only test build. Android may ask you to allow installation from this source."
+          gh release upload nook-test-latest Nook-test.apk --clobber
