@@ -48,6 +48,9 @@ If dependency versions have advanced, create a current Expo project using `npx c
 - Explicit test-request generator for previewing host workflows offline
 - Optional Supabase email authentication gate
 - Cloud group, membership, rating and report adapters
+- Cloud Groups screen with live city discovery and Realtime refresh
+- Cross-phone join requests and host approval/rejection controls
+- Database-enforced women-only and trusted-member eligibility
 - RLS-first cloud schema with moderator authority separated from editable profile data
 - Pinned cloud dependencies and committed npm lockfile
 
@@ -75,4 +78,4 @@ This build demonstrates the product rules locally. Gender/face verification, cro
 
 ## Next milestone
 
-Configure `.env` on the development machine and verify the two-phone signup, group join and host-approval flow. Do not add chat or maps until access-control rules are tested.
+Verify the complete two-phone signup, group join and host-approval flow on physical Android devices. Do not add chat or maps until access-control rules are tested.
