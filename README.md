@@ -9,6 +9,8 @@ An activity-first friendship app for India. People discover small, intentional p
 3. Run `npx expo start`.
 4. Scan the QR code with Expo Go. Phone and computer should be on the same network.
 
+For cloud mode, copy `.env.example` to `.env` and add the dedicated Nook Supabase URL and publishable key. Never put a secret or service-role key in the Android app.
+
 If dependency versions have advanced, create a current Expo project using `npx create-expo-app@latest`, then replace its `App.tsx` with the one here.
 
 ## Included in this prototype
@@ -42,6 +44,10 @@ If dependency versions have advanced, create a current Expo project using `npx c
 - Member removal and blocking controls
 - Report review state and reversible seven-day restrictions
 - Explicit test-request generator for previewing host workflows offline
+- Optional Supabase email authentication gate
+- Cloud group, membership, rating and report adapters
+- RLS-first cloud schema with moderator authority separated from editable profile data
+- Pinned cloud dependencies and committed npm lockfile
 
 ## Prototype boundary
 
@@ -67,4 +73,4 @@ This build demonstrates the product rules locally. Gender/face verification, cro
 
 ## Next milestone
 
-Add a small secure backend for authentication, cross-device group discovery and verified moderation. Replace the local test request with authenticated incoming requests. Do not add chat or maps until access-control rules are tested.
+Create a dedicated Nook Supabase project, apply `supabase/schema.sql`, run Security Advisor, configure `.env`, and verify the two-phone join/approval flow. Do not add chat or maps until access-control rules are tested.
