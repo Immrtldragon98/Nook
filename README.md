@@ -38,6 +38,10 @@ If dependency versions have advanced, create a current Expo project using `npx c
 - Persistent activity groups and join-approval requests
 - Women-only and trusted-member-only group controls
 - Women-only local safety ratings
+- Host console for approving and rejecting join requests
+- Member removal and blocking controls
+- Report review state and reversible seven-day restrictions
+- Explicit test-request generator for previewing host workflows offline
 
 ## Prototype boundary
 
@@ -63,4 +67,4 @@ This build demonstrates the product rules locally. Gender/face verification, cro
 
 ## Next milestone
 
-Add a small secure backend for authentication, cross-device group discovery and verified moderation. Do not add chat or maps until access-control rules are tested.
+Add a small secure backend for authentication, cross-device group discovery and verified moderation. Replace the local test request with authenticated incoming requests. Do not add chat or maps until access-control rules are tested.
