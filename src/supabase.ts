@@ -3,11 +3,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, Platform } from "react-native";
 import { createClient } from "@supabase/supabase-js";
 
-const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-export const cloudEnabled = Boolean(
-  url && key && !url.includes("YOUR_PROJECT_REF"),
-);
+const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "https://wjuwshaexqigxlzmtnkz.supabase.co";
+const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_By-C-1yDxh87w6F9wBERXg_WEF1yzY7";
+export const cloudEnabled = true;
 export const supabase = createClient(
   url ?? "https://invalid.local",
   key ?? "not-configured",
