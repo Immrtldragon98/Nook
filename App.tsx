@@ -7,6 +7,8 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Crypto from 'expo-crypto';
 import { addPendingConnection, addTestHostRequest, clearGroupReview, getGender, getModerationState, getProfile, hasConnection, isOwnedGroup, listGroups, listHostRequests, listMemberships, listPlans, migrateDatabase, rateGroupSafety, reportGroup, requestGroupJoin, restrictGroup, saveGroup, savePlan, saveProfile, setGender, updateHostRequest, type GroupMembership, type HostRequest, type LocalProfile, type ModerationState, type StoredGroup, type StoredPlan } from './src/database';
 import { QRCodeMatrix } from './src/QRCodeMatrix';
+import { AuthGate } from './src/AuthGate';
+import { cloudEnabled } from './src/supabase';
 
 type Tab = 'Discover' | 'Groups' | 'Create' | 'Plans' | 'Profile';
 type Hangout = {
@@ -28,7 +30,8 @@ const USER_TRUST = { isAdult: true, isVerified: true, attendedPlans: 3, hasActiv
 const canUseTrips = USER_TRUST.isAdult && USER_TRUST.isVerified && USER_TRUST.attendedPlans >= 3 && !USER_TRUST.hasActiveRestriction;
 
 export default function App() {
-  return <SQLiteProvider databaseName="nook.db" onInit={migrateDatabase}><Nook /></SQLiteProvider>;
+  const app=<SQLiteProvider databaseName="nook.db" onInit={migrateDatabase}><Nook /></SQLiteProvider>;
+  return cloudEnabled?<AuthGate>{app}</AuthGate>:app;
 }
 
 function Nook() {
