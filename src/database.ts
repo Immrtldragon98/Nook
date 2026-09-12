@@ -15,6 +15,8 @@ export type LocalProfile = { id:number; account_code:string; name:string; city:s
 export type LocalConnection = { id:number; account_code:string; display_name:string; status:string; created_at:string; };
 export type StoredGroup = { id:number; title:string; category:string; area:string; language:string; description:string; women_only:number; trusted_only:number; safety_total:number; safety_count:number; created_at:string; };
 export type GroupMembership = { id:number; group_id:number; status:string; created_at:string; };
+export type HostRequest = { id:number; group_id:number; account_code:string; display_name:string; status:string; trusted:number; created_at:string; };
+export type ModerationState = { group_id:number; status:string; report_count:number; restriction_until:string|null; };
 
 export async function migrateDatabase(db: SQLiteDatabase) {
   await db.execAsync(`
@@ -80,19 +82,49 @@ export async function migrateDatabase(db: SQLiteDatabase) {
       gender TEXT NOT NULL DEFAULT 'prefer_not_to_say' CHECK(gender IN ('woman','man','non_binary','prefer_not_to_say'))
     );
     INSERT OR IGNORE INTO local_settings(id) VALUES (1);
-    PRAGMA user_version = 4;
+    CREATE TABLE IF NOT EXISTS owned_groups (
+      group_id INTEGER PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS host_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      account_code TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      trusted INTEGER NOT NULL DEFAULT 0 CHECK(trusted IN (0,1)),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','removed','blocked')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(group_id,account_code)
+    );
+    CREATE TABLE IF NOT EXISTS group_moderation (
+      group_id INTEGER PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'clear' CHECK(status IN ('clear','under_review','restricted')),
+      report_count INTEGER NOT NULL DEFAULT 0,
+      restriction_until TEXT
+    );
+    PRAGMA user_version = 5;
   `);
 }
 
 export async function listGroups(db:SQLiteDatabase) { return db.getAllAsync<StoredGroup>('SELECT * FROM groups ORDER BY id DESC'); }
 export async function saveGroup(db:SQLiteDatabase, g:Omit<StoredGroup,'id'|'created_at'|'safety_total'|'safety_count'>&{womenOnly:boolean;trustedOnly:boolean}) {
-  return db.runAsync('INSERT INTO groups(title,category,area,language,description,women_only,trusted_only) VALUES(?,?,?,?,?,?,?)',g.title.trim(),g.category,g.area.trim(),g.language.trim(),g.description.trim(),g.womenOnly?1:0,g.trustedOnly?1:0);
+  const result=await db.runAsync('INSERT INTO groups(title,category,area,language,description,women_only,trusted_only) VALUES(?,?,?,?,?,?,?)',g.title.trim(),g.category,g.area.trim(),g.language.trim(),g.description.trim(),g.womenOnly?1:0,g.trustedOnly?1:0);
+  await db.runAsync('INSERT INTO owned_groups(group_id) VALUES(?)',result.lastInsertRowId);
+  await db.runAsync('INSERT INTO group_moderation(group_id) VALUES(?)',result.lastInsertRowId);
+  return result;
 }
 export async function requestGroupJoin(db:SQLiteDatabase, groupId:number) { return db.runAsync("INSERT OR IGNORE INTO group_memberships(group_id,status) VALUES(?,'pending')",groupId); }
 export async function listMemberships(db:SQLiteDatabase) { return db.getAllAsync<GroupMembership>('SELECT * FROM group_memberships'); }
 export async function getGender(db:SQLiteDatabase) { const row=await db.getFirstAsync<{gender:string}>('SELECT gender FROM local_settings WHERE id=1'); return row?.gender??'prefer_not_to_say'; }
 export async function setGender(db:SQLiteDatabase, gender:string) { return db.runAsync('UPDATE local_settings SET gender=? WHERE id=1',gender); }
 export async function rateGroupSafety(db:SQLiteDatabase, groupId:number, rating:number) { if(await getGender(db)!=='woman') throw new Error('women-only-rating'); return db.runAsync('UPDATE groups SET safety_total=safety_total+?, safety_count=safety_count+1 WHERE id=?',rating,groupId); }
+export async function isOwnedGroup(db:SQLiteDatabase,groupId:number){return !!(await db.getFirstAsync('SELECT 1 FROM owned_groups WHERE group_id=?',groupId));}
+export async function listHostRequests(db:SQLiteDatabase,groupId:number){return db.getAllAsync<HostRequest>('SELECT * FROM host_requests WHERE group_id=? ORDER BY id DESC',groupId);}
+export async function updateHostRequest(db:SQLiteDatabase,id:number,status:HostRequest['status']){return db.runAsync('UPDATE host_requests SET status=? WHERE id=?',status,id);}
+export async function addTestHostRequest(db:SQLiteDatabase,groupId:number){return db.runAsync("INSERT OR IGNORE INTO host_requests(group_id,account_code,display_name,trusted) VALUES(?,'NK-TESTMEMBER','Priya (test request)',1)",groupId);}
+export async function getModerationState(db:SQLiteDatabase,groupId:number){return db.getFirstAsync<ModerationState>('SELECT * FROM group_moderation WHERE group_id=?',groupId);}
+export async function reportGroup(db:SQLiteDatabase,groupId:number){await db.runAsync("INSERT OR IGNORE INTO group_moderation(group_id) VALUES(?)",groupId);return db.runAsync("UPDATE group_moderation SET report_count=report_count+1,status='under_review' WHERE group_id=?",groupId);}
+export async function restrictGroup(db:SQLiteDatabase,groupId:number,days:number){const until=new Date(Date.now()+days*86400000).toISOString();return db.runAsync("UPDATE group_moderation SET status='restricted',restriction_until=? WHERE group_id=?",until,groupId);}
+export async function clearGroupReview(db:SQLiteDatabase,groupId:number){return db.runAsync("UPDATE group_moderation SET status='clear',restriction_until=NULL WHERE group_id=?",groupId);}
 
 export async function getProfile(db: SQLiteDatabase) { return db.getFirstAsync<LocalProfile>('SELECT * FROM local_profile WHERE id=1'); }
 export async function saveProfile(db: SQLiteDatabase, p: Omit<LocalProfile,'id'|'account_code'>) {
