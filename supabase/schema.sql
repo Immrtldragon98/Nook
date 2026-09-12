@@ -84,12 +84,21 @@ create policy profiles_read on public.profiles for select to authenticated using
 create policy profiles_insert_self on public.profiles for insert to authenticated with check ((select auth.uid())=id);
 create policy profiles_update_self on public.profiles for update to authenticated using ((select auth.uid())=id) with check ((select auth.uid())=id);
 create policy trust_read_self on public.trust_assertions for select to authenticated using ((select auth.uid())=user_id);
+create policy trust_insert_unverified_self on public.trust_assertions for insert to authenticated with check ((select auth.uid())=user_id and not adult_verified and not woman_verified and not face_verified and attended_plans=0 and restricted_until is null);
 create policy roles_read_self on public.user_roles for select to authenticated using ((select auth.uid())=user_id);
+create policy roles_insert_member_self on public.user_roles for insert to authenticated with check ((select auth.uid())=user_id and role='member');
 create policy groups_read on public.groups for select to authenticated using (true);
 create policy groups_create on public.groups for insert to authenticated with check ((select auth.uid())=host_id);
 create policy groups_update_host on public.groups for update to authenticated using ((select auth.uid())=host_id) with check ((select auth.uid())=host_id);
 create policy memberships_read_self_or_host on public.memberships for select to authenticated using ((select auth.uid())=user_id or exists(select 1 from public.groups g where g.id=group_id and g.host_id=(select auth.uid())));
-create policy memberships_request_self on public.memberships for insert to authenticated with check ((select auth.uid())=user_id and status='pending');
+create policy memberships_request_self on public.memberships for insert to authenticated with check (
+  (select auth.uid())=user_id and status='pending'
+  and exists (
+    select 1 from public.groups g where g.id=group_id
+    and (not g.women_only or exists (select 1 from public.trust_assertions t where t.user_id=(select auth.uid()) and t.woman_verified and t.face_verified and (t.restricted_until is null or t.restricted_until<now())))
+    and (not g.trusted_only or exists (select 1 from public.trust_assertions t where t.user_id=(select auth.uid()) and t.adult_verified and t.face_verified and t.attended_plans>=3 and (t.restricted_until is null or t.restricted_until<now())))
+  )
+);
 create policy memberships_host_decision on public.memberships for update to authenticated using (exists(select 1 from public.groups g where g.id=group_id and g.host_id=(select auth.uid()))) with check (exists(select 1 from public.groups g where g.id=group_id and g.host_id=(select auth.uid())));
 create policy ratings_read on public.safety_ratings for select to authenticated using (true);
 create policy ratings_verified_women on public.safety_ratings for insert to authenticated with check ((select auth.uid())=user_id and exists(select 1 from public.trust_assertions t where t.user_id=(select auth.uid()) and t.woman_verified and t.face_verified and (t.restricted_until is null or t.restricted_until<now())) and exists(select 1 from public.memberships m where m.group_id=safety_ratings.group_id and m.user_id=(select auth.uid()) and m.status='approved'));
@@ -99,7 +108,9 @@ create policy moderation_read_host_or_moderator on public.group_moderation for s
 create policy moderation_update_moderator on public.group_moderation for update to authenticated using (exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='moderator')) with check (exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='moderator'));
 
 grant select,insert,update on public.profiles to authenticated;
-grant select on public.trust_assertions,public.user_roles to authenticated;
+grant select,insert on public.trust_assertions,public.user_roles to authenticated;
 grant select,insert,update on public.groups,public.memberships to authenticated;
 grant select,insert on public.safety_ratings,public.reports to authenticated;
 grant select,update on public.group_moderation to authenticated;
+
+alter publication supabase_realtime add table public.groups, public.memberships;
