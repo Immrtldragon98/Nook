@@ -2,6 +2,10 @@
 
 An activity-first friendship app for India. People discover small, intentional plans by activity, approximate place, time and language instead of swiping through profiles.
 
+## Download the test APK
+
+Download Nook-test.apk from the [latest test release](https://github.com/Immrtldragon98/Nook/releases/tag/nook-test-latest). This is a debug-signed friends-only build, so Android may ask you to allow installation from your browser or GitHub app.
+
 ## Run on Android
 
 1. Install Node.js 20 or newer and the Expo Go app on your Android phone.
