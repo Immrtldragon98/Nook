@@ -65,6 +65,12 @@ create table public.group_moderation (
   updated_at timestamptz not null default now()
 );
 
+create index groups_host_id_idx on public.groups(host_id);
+create index memberships_user_id_idx on public.memberships(user_id);
+create index reports_group_id_idx on public.reports(group_id);
+create index reports_reporter_id_idx on public.reports(reporter_id);
+create index safety_ratings_user_id_idx on public.safety_ratings(user_id);
+
 alter table public.profiles enable row level security;
 alter table public.trust_assertions enable row level security;
 alter table public.user_roles enable row level security;
