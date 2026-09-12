@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Nook",
+    "slug": "nook",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "com.immrtldragon.nook",
+      "adaptiveIcon": { "backgroundColor": "#F4F1E8" },
+      "permissions": ["CAMERA"]
+    },
+    "plugins": [["expo-camera", {"cameraPermission": "Allow Nook to scan a connection QR code", "recordAudioAndroid": false, "barcodeScannerEnabled": true}]]
+  }
+}
