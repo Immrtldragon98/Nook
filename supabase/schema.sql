@@ -180,6 +180,7 @@ alter publication supabase_realtime add table public.plans;
 
 -- Account identity: username is public; age/gender and login email remain private.
 create extension if not exists citext;
+alter extension citext set schema extensions;
 alter table public.profiles add column username citext;
 create unique index profiles_username_unique_idx on public.profiles(username) where username is not null;
 create table public.account_details (
@@ -202,6 +203,8 @@ create policy account_details_update_self on public.account_details for update t
 using((select auth.uid())=user_id) with check((select auth.uid())=user_id);
 grant select,update on public.account_details to authenticated;
 revoke all on public.login_handles from anon,authenticated;
+create policy login_handles_deny_clients on public.login_handles for all to anon,authenticated
+using(false) with check(false);
 grant select on public.login_handles to service_role;
 create schema nook_private;
 revoke all on schema nook_private from public,anon,authenticated;
