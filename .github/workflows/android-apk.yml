@@ -39,11 +39,11 @@ jobs:
         run: npm run check
       - name: Generate Android project
         run: npx expo prebuild --platform android --no-install --clean
-      - name: Build installable debug APK
+      - name: Build standalone APK with bundled JavaScript
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
       - name: Name APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk Nook-test.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk Nook-test.apk
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
