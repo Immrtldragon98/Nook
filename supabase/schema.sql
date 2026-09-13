@@ -177,3 +177,49 @@ grant select,insert,update on public.plans to authenticated;
 grant select,insert on public.connection_qr_tokens to authenticated;
 grant select,insert,update on public.connections to authenticated;
 alter publication supabase_realtime add table public.plans;
+
+-- Account identity: username is public; age/gender and login email remain private.
+create extension if not exists citext;
+alter table public.profiles add column username citext;
+create unique index profiles_username_unique_idx on public.profiles(username) where username is not null;
+create table public.account_details (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  gender text not null check(gender in ('woman','man','non_binary','prefer_not_to_say')),
+  declared_age smallint not null check(declared_age between 18 and 100),
+  phone_e164 text, phone_verified_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create table public.login_handles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  username citext not null unique check(username ~ '^[a-zA-Z][a-zA-Z0-9_]{2,19}$'),
+  email citext not null
+);
+alter table public.account_details enable row level security;
+alter table public.login_handles enable row level security;
+create policy account_details_read_self on public.account_details for select to authenticated
+using((select auth.uid())=user_id);
+create policy account_details_update_self on public.account_details for update to authenticated
+using((select auth.uid())=user_id) with check((select auth.uid())=user_id);
+grant select,update on public.account_details to authenticated;
+revoke all on public.login_handles from anon,authenticated;
+grant select on public.login_handles to service_role;
+create schema nook_private;
+revoke all on schema nook_private from public,anon,authenticated;
+create function nook_private.create_account_records() returns trigger language plpgsql security definer
+set search_path='' as $$
+declare new_username text:=new.raw_user_meta_data->>'username';
+new_gender text:=coalesce(new.raw_user_meta_data->>'gender','prefer_not_to_say');
+new_age smallint:=(new.raw_user_meta_data->>'declared_age')::smallint;
+begin
+  if new_username is null or new_age is null then raise exception 'username and age are required'; end if;
+  insert into public.login_handles values(new.id,new_username,new.email);
+  insert into public.profiles(id,display_name,username,city,area)
+    values(new.id,new_username,new_username,'Not set','Not set');
+  insert into public.account_details(user_id,gender,declared_age) values(new.id,new_gender,new_age);
+  insert into public.trust_assertions(user_id) values(new.id) on conflict do nothing;
+  insert into public.user_roles(user_id,role) values(new.id,'member') on conflict do nothing;
+  return new;
+end; $$;
+revoke all on function nook_private.create_account_records() from public,anon,authenticated;
+create trigger nook_create_account_records after insert on auth.users
+for each row execute function nook_private.create_account_records();
