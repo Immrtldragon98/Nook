@@ -48,22 +48,28 @@ import { AuthGate } from "./src/AuthGate";
 import { cloudEnabled } from "./src/supabase";
 import {
   createCloudGroup,
+  createCloudPlan,
+  createConnectionQrToken,
   currentCloudUserId,
   decideCloudMembership,
   initializeCloudIdentity,
   listCloudGroups,
+  listCloudPlans,
   listCloudHostRequests,
   requestCloudMembership,
+  requestCloudConnection,
+  hasCloudConnection,
   submitCloudReport,
   submitCloudSafetyRating,
   watchCloudGroups,
+  watchCloudPlans,
   type CloudGroup,
   type CloudRequest,
 } from "./src/cloud";
 
 type Tab = "Discover" | "Groups" | "Create" | "Plans" | "Profile";
 type Hangout = {
-  id: number;
+  id: number | string;
   emoji: string;
   category: string;
   title: string;
@@ -193,14 +199,22 @@ function Nook() {
   const db = useSQLiteContext();
   const [tab, setTab] = useState<Tab>("Discover");
   const [category, setCategory] = useState("All");
-  const [joined, setJoined] = useState<number[]>([]);
+  const [joined, setJoined] = useState<(number | string)[]>([]);
   const [localPlans, setLocalPlans] = useState<Hangout[]>([]);
   const [profile, setProfile] = useState<LocalProfile | null | undefined>(
     undefined,
   );
   async function refreshPlans() {
-    const rows = await listPlans(db);
-    setLocalPlans(rows.map(toHangout));
+    try {
+      const rows = await listCloudPlans(profile?.city ?? "");
+      setLocalPlans(rows.map((p) => ({ id:p.id, emoji:p.trusted_only?"🧳":"✨", category:p.category,
+        title:p.title, area:p.area, time:p.starts_at, host:"Nook member", spots:p.spots,
+        language:p.language, audience:p.trusted_only?"Trusted members only":"Open plan", safety:0,
+        trustedOnly:p.trusted_only })));
+    } catch {
+      const rows = await listPlans(db);
+      setLocalPlans(rows.map(toHangout));
+    }
   }
   useEffect(() => {
     refreshPlans().catch(() =>
@@ -213,6 +227,8 @@ function Nook() {
       .then(setProfile)
       .catch(() => setProfile(null));
   }, []);
+  useEffect(() => cloudEnabled ? watchCloudPlans(() => refreshPlans().catch(() => {})) : undefined,
+    [profile?.city]);
   useEffect(() => {
     if (profile && cloudEnabled)
       initializeCloudIdentity(profile).catch(() =>
@@ -400,6 +416,7 @@ function Discover({ visible, category, setCategory, joined, setJoined }: any) {
 
 function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
   const db = useSQLiteContext();
+  const [profile, setProfile] = useState<LocalProfile | null>(null);
   const [kind, setKind] = useState<"local" | "trip">("local");
   const [title, setTitle] = useState("");
   const [area, setArea] = useState("");
@@ -407,6 +424,7 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
   const [language, setLanguage] = useState("English");
   const [spots, setSpots] = useState("4");
   const [saving, setSaving] = useState(false);
+  useEffect(() => { getProfile(db).then(setProfile); }, []);
   async function submit() {
     if (!title.trim() || !area.trim() || !startsAt.trim())
       return Alert.alert(
@@ -423,16 +441,18 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
       return Alert.alert("Check group size", "Choose between 2 and 12 people.");
     setSaving(true);
     try {
-      await savePlan(db, {
+      if (!profile) throw new Error("Profile unavailable");
+      await createCloudPlan({
         title,
         category: kind === "trip" ? "Trips" : "New in city",
+        city: profile.city,
         area,
         starts_at: startsAt,
         language,
         spots: count,
-        trustedOnly: kind === "trip",
+        trusted_only: kind === "trip",
       });
-      Alert.alert("Plan saved", "This plan now lives on your phone.");
+      Alert.alert("Plan published", "Friends in your city can now see it from anywhere.");
       await onCreated();
     } catch {
       Alert.alert("Could not save", "Please check the details and try again.");
@@ -1270,7 +1290,7 @@ function Toggle({
   );
 }
 
-function Plans({ joined }: { joined: number[] }) {
+function Plans({ joined }: { joined: (number | string)[] }) {
   const plans = hangouts.filter((h) => joined.includes(h.id));
   return (
     <ScrollView contentContainerStyle={styles.page}>
@@ -1381,14 +1401,18 @@ function Profile({
   const initial = profile.name.slice(0, 1).toUpperCase();
   const [mode, setMode] = useState<"profile" | "show" | "scan">("profile");
   const [nonce, setNonce] = useState(Crypto.randomUUID());
-  const expiry = Date.now() + 5 * 60 * 1000;
+  const [cloudQr, setCloudQr] = useState<{token:string;ownerId:string;expiresAt:string}|null>(null);
+  useEffect(() => { if (mode === "show") createConnectionQrToken().then(setCloudQr).catch(() => {
+    Alert.alert("Could not create QR", "Connect to the internet and try again."); setMode("profile");
+  }); }, [mode, nonce]);
   const payload = JSON.stringify({
-    v: 1,
+    v: 2,
     type: "nook-connect",
     account: profile.account_code,
     name: profile.name,
-    exp: expiry,
-    nonce,
+    exp: cloudQr ? new Date(cloudQr.expiresAt).getTime() : 0,
+    token: cloudQr?.token,
+    userId: cloudQr?.ownerId,
   });
   if (mode === "show")
     return (
@@ -1398,7 +1422,7 @@ function Profile({
           <Text style={styles.intro}>
             Ask the other person to scan this within 5 minutes.
           </Text>
-          <QRCodeMatrix value={payload} />
+          {cloudQr ? <QRCodeMatrix value={payload} /> : <Text style={styles.meta}>Creating secure QR…</Text>}
           <Text style={styles.accountCode}>{profile.account_code}</Text>
           <Text style={styles.qrCopy}>
             No phone number or contact list is shared.
@@ -1505,10 +1529,10 @@ function QRScanner({
       const p = JSON.parse(data);
       if (
         p.type !== "nook-connect" ||
-        p.v !== 1 ||
+        p.v !== 2 ||
         !p.account ||
         !p.name ||
-        !p.exp
+        !p.exp || !p.token || !p.userId
       )
         throw new Error("format");
       if (p.account === ownCode)
@@ -1518,7 +1542,7 @@ function QRScanner({
         );
       if (Date.now() > p.exp)
         return Alert.alert("QR expired", "Ask them to generate a new QR.");
-      if (await hasConnection(db, p.account))
+      if (await hasCloudConnection(p.userId))
         return Alert.alert(
           "Already connected",
           "This account is already on your phone.",
@@ -1531,8 +1555,9 @@ function QRScanner({
           {
             text: "Add pending",
             onPress: async () => {
-              await addPendingConnection(db, p.account, p.name);
-              Alert.alert("Pending connection saved");
+              await requestCloudConnection(p.token, p.userId);
+              await addPendingConnection(db, p.account, p.name).catch(() => {});
+              Alert.alert("Connection requested", "They can see it from their own phone.");
               onClose();
             },
           },
