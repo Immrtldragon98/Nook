@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  Linking,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,11 +16,24 @@ import { supabase } from "./supabase";
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   useEffect(() => {
+    async function acceptEmailLink(url: string | null) {
+      if (!url) return;
+      const fragment = url.split("#")[1] ?? url.split("?")[1] ?? "";
+      const params = new URLSearchParams(fragment);
+      const access_token = params.get("access_token");
+      const refresh_token = params.get("refresh_token");
+      if (access_token && refresh_token)
+        await supabase.auth.setSession({ access_token, refresh_token });
+    }
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    Linking.getInitialURL().then(acceptEmailLink);
+    const link = Linking.addEventListener("url", ({ url }) => {
+      acceptEmailLink(url).catch(() => Alert.alert("Confirmation failed", "Please open the newest confirmation email."));
+    });
     const { data } = supabase.auth.onAuthStateChange((_event, next) =>
       setSession(next),
     );
-    return () => data.subscription.unsubscribe();
+    return () => { data.subscription.unsubscribe(); link.remove(); };
   }, []);
   if (session === undefined) return <Screen title="Opening Nook…" />;
   if (!session) return <Auth />;
@@ -26,23 +41,46 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 }
 function Auth() {
   const [mode, setMode] = useState<"in" | "up">("up");
+  const [identifier, setIdentifier] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [age, setAge] = useState("");
+  const [gender, setGender] = useState("prefer_not_to_say");
   const [busy, setBusy] = useState(false);
   async function submit(mode: "in" | "up") {
-    if (!email.trim() || password.length < 8)
+    if (password.length < 8 || (mode === "in" ? !identifier.trim() : !email.trim()))
       return Alert.alert(
         "Check details",
         "Use a valid email and a password of at least 8 characters.",
       );
     setBusy(true);
-    const { error } =
-      mode === "in"
-        ? await supabase.auth.signInWithPassword({
-            email: email.trim(),
-            password,
-          })
-        : await supabase.auth.signUp({ email: email.trim(), password });
+    if (mode === "up" && !/^[a-zA-Z][a-zA-Z0-9_]{2,19}$/.test(username))
+      return Alert.alert("Check username", "Use 3–20 letters, numbers or underscores; start with a letter.");
+    const declaredAge = Number(age);
+    if (mode === "up" && (!Number.isInteger(declaredAge) || declaredAge < 18 || declaredAge > 100))
+      return Alert.alert("Check age", "Nook currently supports adults aged 18–100.");
+    let error: any = null;
+    if (mode === "in") {
+      const result = await supabase.functions.invoke("username-login", {
+        body: { identifier: identifier.trim(), password },
+      });
+      error = result.error ?? (result.data?.error ? new Error(result.data.error) : null);
+      if (!error && result.data?.access_token)
+        ({ error } = await supabase.auth.setSession({
+          access_token: result.data.access_token,
+          refresh_token: result.data.refresh_token,
+        }));
+    } else {
+      ({ error } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          emailRedirectTo: "nook://auth/callback",
+          data: { username: username.trim(), gender, declared_age: declaredAge },
+        },
+      }));
+    }
     setBusy(false);
     if (error) Alert.alert("Could not continue", error.message);
     else if (mode === "up")
@@ -53,6 +91,7 @@ function Auth() {
   }
   return (
     <SafeAreaView style={s.safe}>
+      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
       <View style={s.card}>
         <Text style={s.brand}>Nook</Text>
         <Text style={s.title}>{mode === "up" ? "Create your Nook." : "Welcome back."}</Text>
@@ -69,14 +108,24 @@ function Auth() {
             <Text style={[s.tabText, mode === "in" && s.tabTextActive]}>Sign in</Text>
           </TouchableOpacity>
         </View>
-        <TextInput
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          placeholder="Email"
-          style={s.input}
-        />
+        {mode === "up" ? <>
+          <TextInput value={username} onChangeText={setUsername} autoCapitalize="none"
+            placeholder="Username (example: Logan)" style={s.input} />
+          <TextInput value={email} onChangeText={setEmail} autoCapitalize="none"
+            keyboardType="email-address" placeholder="Email" style={s.input} />
+          <TextInput value={age} onChangeText={setAge} keyboardType="number-pad"
+            placeholder="Age (18+)" style={s.input} />
+          <Text style={s.fieldLabel}>Gender</Text>
+          <View style={s.genderRow}>
+            {[['woman','Woman'],['man','Man'],['non_binary','Non-binary'],['prefer_not_to_say','Skip']].map(([value,label]) => (
+              <TouchableOpacity key={value} onPress={() => setGender(value)}
+                style={[s.genderChip, gender === value && s.genderActive]}>
+                <Text style={[s.genderText, gender === value && s.genderTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </> : <TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none"
+          placeholder="Username or email" style={s.input} />}
         <TextInput
           value={password}
           onChangeText={setPassword}
@@ -97,6 +146,7 @@ function Auth() {
           {mode === "up" ? "We may ask you to confirm your email before signing in." : "Use the email and password you registered with."}
         </Text>
       </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -112,6 +162,7 @@ function Screen({ title }: { title: string }) {
 }
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8F6EF", justifyContent: "center" },
+  scroll: { flexGrow: 1, justifyContent: "center", paddingVertical: 18 },
   card: { margin: 22, padding: 24, borderRadius: 26, backgroundColor: "#FFF" },
   brand: {
     fontSize: 16,
@@ -140,6 +191,12 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     marginBottom: 12,
   },
+  fieldLabel: { color: "#4F5955", fontWeight: "800", fontSize: 12, marginBottom: 8 },
+  genderRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 12 },
+  genderChip: { borderWidth: 1, borderColor: "#DDDAD0", borderRadius: 12, paddingHorizontal: 11, paddingVertical: 9 },
+  genderActive: { backgroundColor: "#E3F2EC", borderColor: "#247064" },
+  genderText: { color: "#68716D", fontSize: 12, fontWeight: "700" },
+  genderTextActive: { color: "#247064" },
   primary: {
     backgroundColor: "#247064",
     padding: 16,
