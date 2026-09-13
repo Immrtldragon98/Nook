@@ -10,6 +10,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - "src/**"
+      - "assets/**"
       - ".github/workflows/android-apk.yml"
 
 permissions:
