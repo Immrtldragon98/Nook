@@ -20,6 +20,56 @@ export type CloudRequest = {
   created_at: string;
   display_name: string;
 };
+export type CloudPlan = {
+  id: string; creator_id: string; title: string; category: string; city: string;
+  area: string; starts_at: string; language: string; spots: number;
+  trusted_only: boolean; created_at: string;
+};
+
+export async function listCloudPlans(city: string, limit = 50) {
+  const { data, error } = await supabase.from("plans").select("*")
+    .eq("city", city).order("created_at", { ascending: false }).limit(limit);
+  if (error) throw error;
+  return (data ?? []) as CloudPlan[];
+}
+
+export async function createCloudPlan(plan: Omit<CloudPlan, "id" | "creator_id" | "created_at">) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const { data, error } = await supabase.from("plans")
+    .insert({ ...plan, creator_id: user.id }).select().single();
+  if (error) throw error;
+  return data as CloudPlan;
+}
+
+export async function createConnectionQrToken() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  const { data, error } = await supabase.from("connection_qr_tokens")
+    .insert({ owner_id: user.id, expires_at: expiresAt }).select("id,expires_at").single();
+  if (error) throw error;
+  return { token: data.id as string, ownerId: user.id, expiresAt: data.expires_at as string };
+}
+
+export async function requestCloudConnection(tokenId: string, addresseeId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const { error } = await supabase.from("connections").insert({
+    requester_id: user.id, addressee_id: addresseeId, token_id: tokenId, status: "pending",
+  });
+  if (error) throw error;
+}
+
+export async function hasCloudConnection(otherUserId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const { data, error } = await supabase.from("connections").select("requester_id")
+    .or(`and(requester_id.eq.${user.id},addressee_id.eq.${otherUserId}),and(requester_id.eq.${otherUserId},addressee_id.eq.${user.id})`)
+    .limit(1);
+  if (error) throw error;
+  return !!data?.length;
+}
 
 export async function initializeCloudIdentity(profile: {
   name: string;
@@ -166,4 +216,10 @@ export function watchCloudGroups(onChange: () => void) {
   return () => {
     supabase.removeChannel(channel);
   };
+}
+export function watchCloudPlans(onChange: () => void) {
+  const channel = supabase.channel("nook-plans").on(
+    "postgres_changes", { event: "*", schema: "public", table: "plans" }, onChange,
+  ).subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
