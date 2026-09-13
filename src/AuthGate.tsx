@@ -25,6 +25,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 function Auth() {
+  const [mode, setMode] = useState<"in" | "up">("up");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,11 +55,20 @@ function Auth() {
     <SafeAreaView style={s.safe}>
       <View style={s.card}>
         <Text style={s.brand}>Nook</Text>
-        <Text style={s.title}>Meet through real plans.</Text>
+        <Text style={s.title}>{mode === "up" ? "Create your Nook." : "Welcome back."}</Text>
         <Text style={s.copy}>
-          Your number stays private. Sign in to sync groups safely across
-          phones.
+          {mode === "up"
+            ? "Find friends through real activities—not swiping. Your phone number stays private."
+            : "Sign in to see your groups, plans and connections on this phone."}
         </Text>
+        <View style={s.tabs}>
+          <TouchableOpacity onPress={() => setMode("up")} style={[s.tab, mode === "up" && s.tabActive]}>
+            <Text style={[s.tabText, mode === "up" && s.tabTextActive]}>Create account</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setMode("in")} style={[s.tab, mode === "in" && s.tabActive]}>
+            <Text style={[s.tabText, mode === "in" && s.tabTextActive]}>Sign in</Text>
+          </TouchableOpacity>
+        </View>
         <TextInput
           value={email}
           onChangeText={setEmail}
@@ -76,18 +86,16 @@ function Auth() {
         />
         <TouchableOpacity
           disabled={busy}
-          onPress={() => submit("in")}
+          onPress={() => submit(mode)}
           style={s.primary}
         >
-          <Text style={s.primaryText}>{busy ? "Please wait…" : "Sign in"}</Text>
+          <Text style={s.primaryText}>
+            {busy ? "Please wait…" : mode === "up" ? "Create my account" : "Sign in"}
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          disabled={busy}
-          onPress={() => submit("up")}
-          style={s.secondary}
-        >
-          <Text style={s.secondaryText}>Create account</Text>
-        </TouchableOpacity>
+        <Text style={s.note}>
+          {mode === "up" ? "We may ask you to confirm your email before signing in." : "Use the email and password you registered with."}
+        </Text>
       </View>
     </SafeAreaView>
   );
@@ -119,6 +127,11 @@ const s = StyleSheet.create({
     marginTop: 12,
   },
   copy: { fontSize: 15, lineHeight: 22, color: "#68716D", marginVertical: 18 },
+  tabs: { flexDirection: "row", backgroundColor: "#F1EFE8", borderRadius: 14, padding: 4, marginBottom: 16 },
+  tab: { flex: 1, alignItems: "center", paddingVertical: 11, borderRadius: 11 },
+  tabActive: { backgroundColor: "#247064" },
+  tabText: { color: "#68716D", fontWeight: "800" },
+  tabTextActive: { color: "#FFF" },
   input: {
     height: 52,
     borderWidth: 1,
@@ -134,6 +147,5 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
   primaryText: { color: "#FFF", fontWeight: "900" },
-  secondary: { padding: 15, alignItems: "center" },
-  secondaryText: { color: "#503A82", fontWeight: "900" },
+  note: { color: "#68716D", fontSize: 12, lineHeight: 17, textAlign: "center", marginTop: 12 },
 });
