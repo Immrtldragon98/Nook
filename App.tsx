@@ -61,6 +61,9 @@ import {
   decideCloudPlanRequest,
   requestCloudPlan,
   getCloudPlanHost,
+  listMyNotifications,
+  markNotificationsRead,
+  watchMyNotifications,
   listCloudHostRequests,
   requestCloudMembership,
   requestCloudConnection,
@@ -100,6 +103,31 @@ const categories = [
   "Food",
   "Shopping",
 ];
+const bengaluruAreas = ["Indiranagar", "Koramangala", "HSR Layout", "Whitefield", "Jayanagar", "Malleshwaram", "Church Street", "Electronic City"];
+const planTimes = ["07:00", "09:00", "11:00", "15:00", "17:30", "19:00"];
+
+function nextPlanDays() {
+  return Array.from({ length: 7 }, (_, offset) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + offset + 1);
+    return date;
+  });
+}
+
+function toPlanIso(day: Date | null, time: string) {
+  if (!day || !time) return "";
+  const [hours, minutes] = time.split(":").map(Number);
+  const date = new Date(day);
+  date.setHours(hours, minutes, 0, 0);
+  return date.toISOString();
+}
+
+function formatPlanTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
 const hangouts: Hangout[] = [
   {
     id: 1,
@@ -217,7 +245,7 @@ function Nook() {
     try {
       const rows = await listCloudPlans(profile?.city ?? "");
       setLocalPlans(rows.map((p) => ({ id:p.id, emoji:p.trusted_only?"🧳":"✨", category:p.category,
-        title:p.title, area:p.area, time:p.starts_at, host:"Nook member", spots:p.spots,
+        title:p.title, area:p.area, time:formatPlanTime(p.starts_at), host:"Nook member", spots:p.spots,
         language:p.language, audience:p.trusted_only?"Trusted members only":"Open plan", safety:0,
         trustedOnly:p.trusted_only, creatorId:p.creator_id })));
     } catch {
@@ -438,13 +466,15 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
   const [kind, setKind] = useState<"local" | "trip">("local");
   const [title, setTitle] = useState("");
   const [area, setArea] = useState("");
-  const [startsAt, setStartsAt] = useState("");
+  const [day, setDay] = useState<Date | null>(null);
+  const [time, setTime] = useState("");
   const [language, setLanguage] = useState("English");
   const [spots, setSpots] = useState("4");
   const [saving, setSaving] = useState(false);
   useEffect(() => { getProfile(db).then(setProfile); }, []);
   async function submit() {
-    if (!title.trim() || !area.trim() || !startsAt.trim())
+    const startsAt = toPlanIso(day, time);
+    if (!title.trim() || !area.trim() || !startsAt)
       return Alert.alert(
         "Complete the plan",
         "Add an activity, area, and date/time.",
@@ -543,20 +573,9 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
             : "Badminton after work"
         }
       />
-      <Field
-        label={kind === "trip" ? "Public meeting point" : "Approximate area"}
-        value={area}
-        onChangeText={setArea}
-        placeholder="Indiranagar"
-      />
-      <Field
-        label={
-          kind === "trip" ? "Start and return time" : "Date and start time"
-        }
-        value={startsAt}
-        onChangeText={setStartsAt}
-        placeholder="Sunday · 7:00 AM"
-      />
+      <ChoiceField label={kind === "trip" ? "Public meeting area" : "Approximate area"} options={bengaluruAreas} value={area} onChange={setArea} />
+      <ChoiceField label="Choose a day" options={nextPlanDays().map((d) => d.toISOString())} value={day?.toISOString() ?? ""} onChange={(v) => setDay(new Date(v))} format={(v) => new Date(v).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} />
+      <ChoiceField label={kind === "trip" ? "Departure time" : "Start time"} options={planTimes} value={time} onChange={setTime} format={(v) => { const [h,m]=v.split(":").map(Number); return new Date(2000,0,1,h,m).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}); }} />
       <Field
         label="Group language"
         value={language}
@@ -621,6 +640,17 @@ function Field({
       />
     </View>
   );
+}
+
+function ChoiceField({ label, options, value, onChange, format = (v) => v }: { label: string; options: string[]; value: string; onChange: (v: string) => void; format?: (v: string) => string }) {
+  return <View style={styles.field}>
+    <Text style={styles.fieldLabel}>{label}</Text>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choiceRow}>
+      {options.map((option) => <TouchableOpacity key={option} onPress={() => onChange(option)} style={[styles.choice, value === option && styles.choiceActive]}>
+        <Text style={[styles.choiceText, value === option && styles.choiceTextActive]}>{format(option)}</Text>
+      </TouchableOpacity>)}
+    </ScrollView>
+  </View>;
 }
 
 function Groups({ profile }: { profile: LocalProfile }) {
@@ -1344,8 +1374,9 @@ function ActivityDetail({ plan, onClose, onRequested }: { plan: Hangout; onClose
 function Plans({ joined, onBrowse }: { joined: (number | string)[]; onBrowse: () => void }) {
   const [cloudRequests, setCloudRequests] = useState<any[]>([]);
   const [hostRequests, setHostRequests] = useState<any[]>([]);
-  async function refreshRequests() { const [mine, hosted] = await Promise.all([listMyCloudPlanRequests(),listMyHostedPlanRequests()]); setCloudRequests(mine); setHostRequests(hosted); }
-  useEffect(() => { refreshRequests().catch(() => {}); }, [joined]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  async function refreshRequests() { const [mine, hosted, alerts] = await Promise.all([listMyCloudPlanRequests(),listMyHostedPlanRequests(),listMyNotifications()]); setCloudRequests(mine); setHostRequests(hosted); setNotifications(alerts); }
+  useEffect(() => { refreshRequests().catch(() => {}); return watchMyNotifications(() => refreshRequests().catch(() => {})); }, [joined]);
   const plans = hangouts.filter((h) => joined.includes(h.id));
   const cloudPlans = cloudRequests.filter((r) => r.plan).map((r) => ({...r.plan, requestStatus:r.status}));
   return (
@@ -1354,10 +1385,14 @@ function Plans({ joined, onBrowse }: { joined: (number | string)[]; onBrowse: ()
       <Text style={styles.intro}>
         Requests and confirmed meetups appear here.
       </Text>
+      {notifications.length > 0 && <View style={styles.alertPanel}>
+        <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Updates</Text>{notifications.some((n) => !n.read_at) && <TouchableOpacity onPress={async()=>{await markNotificationsRead(notifications.filter((n)=>!n.read_at).map((n)=>n.id));await refreshRequests();}}><Text style={styles.alertAction}>Mark read</Text></TouchableOpacity>}</View>
+        {notifications.slice(0,4).map((n) => <View key={n.id} style={[styles.alertRow, !n.read_at && styles.alertUnread]}><Text style={styles.alertIcon}>{n.kind === "plan_request" ? "👋" : n.kind === "plan_approved" ? "✓" : "•"}</Text><View style={{flex:1}}><Text style={styles.alertTitle}>{n.title}</Text><Text style={styles.meta}>{n.body}</Text></View></View>)}
+      </View>}
       {hostRequests.length > 0 && <><Text style={styles.sectionTitle}>Requests to your activities</Text>{hostRequests.map((r) => <View key={`${r.plan_id}-${r.user_id}`} style={styles.memberRow}><Text style={styles.kindTitle}>{r.displayName}</Text><Text style={styles.meta}>{r.plan?.title} · {r.status}</Text>{r.status === "pending" && <View style={styles.memberActions}><TouchableOpacity style={styles.approveButton} onPress={async()=>{await decideCloudPlanRequest(r.plan_id,r.user_id,"approved");await refreshRequests();}}><Text style={styles.primaryText}>Approve</Text></TouchableOpacity><TouchableOpacity style={styles.miniButton} onPress={async()=>{await decideCloudPlanRequest(r.plan_id,r.user_id,"rejected");await refreshRequests();}}><Text style={styles.editText}>Reject</Text></TouchableOpacity></View>}</View>)}</>}
       {(plans.length > 0 || cloudPlans.length > 0) && <Text style={styles.sectionTitle}>Your requests</Text>}
       {plans.length || cloudPlans.length ? (<>
-        {cloudPlans.map((h) => <View key={h.id} style={styles.card}><Text style={styles.cardTitle}>{h.trusted_only ? "🧳" : "✨"} {h.title}</Text><Text style={styles.meta}>{h.starts_at} · {h.area}</Text><View style={styles.pending}><Text style={styles.pendingText}>{h.requestStatus === "pending" ? "Waiting for host approval" : h.requestStatus}</Text></View></View>)}
+        {cloudPlans.map((h) => <View key={h.id} style={styles.card}><Text style={styles.cardTitle}>{h.trusted_only ? "🧳" : "✨"} {h.title}</Text><Text style={styles.meta}>{formatPlanTime(h.starts_at)} · {h.area}</Text><View style={styles.pending}><Text style={styles.pendingText}>{h.requestStatus === "pending" ? "Waiting for host approval" : h.requestStatus}</Text></View></View>)}
         {plans.filter((h) => typeof h.id !== "string").map((h) => (
           <View key={h.id} style={styles.card}>
             <Text style={styles.cardTitle}>
@@ -2115,6 +2150,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#17211F",
   },
+  choiceRow: { gap: 8, paddingVertical: 2, paddingRight: 8 },
+  choice: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DDDAD0", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12 },
+  choiceActive: { backgroundColor: "#E2F2EC", borderColor: "#247064" },
+  choiceText: { color: "#59615E", fontSize: 13, fontWeight: "800" },
+  choiceTextActive: { color: "#174E45" },
+  alertPanel: { backgroundColor: "#FFF", borderRadius: 21, borderWidth: 1, borderColor: "#ECEAE3", padding: 14, marginBottom: 20 },
+  alertRow: { flexDirection: "row", gap: 10, padding: 11, borderRadius: 14, marginTop: 7 },
+  alertUnread: { backgroundColor: "#E8F4EF" },
+  alertIcon: { width: 28, height: 28, borderRadius: 10, backgroundColor: "#F0AF49", textAlign: "center", textAlignVertical: "center", fontWeight: "900" },
+  alertTitle: { color: "#17211F", fontWeight: "900", fontSize: 14 },
+  alertAction: { color: "#247064", fontWeight: "900", fontSize: 12 },
   requiredList: {
     backgroundColor: "#EEF0FF",
     padding: 15,

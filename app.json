@@ -3,13 +3,13 @@
     "name": "Nook",
     "slug": "nook",
     "scheme": "nook",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "icon": "./assets/icon-v3.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.immrtldragon.nook",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon-v3.png",
         "backgroundColor": "#F4F1E8"

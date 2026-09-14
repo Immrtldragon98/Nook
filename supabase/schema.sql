@@ -206,6 +206,48 @@ with check (exists(select 1 from public.plans p where p.id=plan_id and p.creator
 grant select,insert,update on public.plan_requests to authenticated;
 alter publication supabase_realtime add table public.plan_requests;
 
+-- Private in-app alerts created by database events, never by an untrusted client.
+create table public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  recipient_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('plan_request','plan_approved','plan_rejected')),
+  title text not null check (char_length(title) between 1 and 80),
+  body text not null check (char_length(body) between 1 and 180),
+  plan_id uuid references public.plans(id) on delete cascade,
+  read_at timestamptz, created_at timestamptz not null default now()
+);
+create index notifications_recipient_created_idx on public.notifications(recipient_id,created_at desc);
+create index notifications_plan_id_idx on public.notifications(plan_id);
+alter table public.notifications enable row level security;
+create policy notifications_read_self on public.notifications for select to authenticated
+using((select auth.uid())=recipient_id);
+create policy notifications_update_self on public.notifications for update to authenticated
+using((select auth.uid())=recipient_id) with check((select auth.uid())=recipient_id);
+grant select,update on public.notifications to authenticated;
+revoke insert,delete on public.notifications from anon,authenticated;
+create schema if not exists private;
+revoke all on schema private from public,anon,authenticated;
+create function private.notify_plan_request() returns trigger language plpgsql security definer
+set search_path='' as $$
+declare plan_row public.plans%rowtype;
+begin
+  select * into plan_row from public.plans where id=new.plan_id;
+  if tg_op='INSERT' then
+    insert into public.notifications(recipient_id,kind,title,body,plan_id)
+    values(plan_row.creator_id,'plan_request','New activity request','Someone asked to join '||plan_row.title||'.',new.plan_id);
+  elsif old.status is distinct from new.status and new.status in ('approved','rejected') then
+    insert into public.notifications(recipient_id,kind,title,body,plan_id)
+    values(new.user_id,case when new.status='approved' then 'plan_approved' else 'plan_rejected' end,
+      case when new.status='approved' then 'You are approved' else 'Request update' end,
+      case when new.status='approved' then 'Your request for '||plan_row.title||' was approved.' else 'Your request for '||plan_row.title||' was not approved this time.' end,new.plan_id);
+  end if;
+  return new;
+end; $$;
+revoke all on function private.notify_plan_request() from public,anon,authenticated;
+create trigger plan_request_notifications after insert or update of status on public.plan_requests
+for each row execute function private.notify_plan_request();
+alter publication supabase_realtime add table public.notifications;
+
 -- Account identity: username is public; age/gender and login email remain private.
 create extension if not exists citext;
 alter extension citext set schema extensions;

@@ -26,6 +26,15 @@ export type CloudPlan = {
   trusted_only: boolean; created_at: string;
 };
 export type CloudPlanRequest = { plan_id: string; status: string; created_at: string; plan: CloudPlan };
+export type CloudNotification = {
+  id: string;
+  kind: "plan_request" | "plan_approved" | "plan_rejected";
+  title: string;
+  body: string;
+  plan_id: string | null;
+  read_at: string | null;
+  created_at: string;
+};
 
 export async function listCloudPlans(city: string, limit = 50) {
   const { data, error } = await supabase.from("plans").select("*")
@@ -78,6 +87,28 @@ export async function listMyHostedPlanRequests() {
 export async function decideCloudPlanRequest(planId:string,userId:string,status:"approved"|"rejected") {
   const { error } = await supabase.from("plan_requests").update({status,updated_at:new Date().toISOString()}).eq("plan_id",planId).eq("user_id",userId);
   if (error) throw error;
+}
+
+export async function listMyNotifications(limit = 20) {
+  const { data, error } = await supabase.from("notifications")
+    .select("id,kind,title,body,plan_id,read_at,created_at")
+    .order("created_at", { ascending: false }).limit(limit);
+  if (error) throw error;
+  return (data ?? []) as CloudNotification[];
+}
+
+export async function markNotificationsRead(ids: string[]) {
+  if (!ids.length) return;
+  const { error } = await supabase.from("notifications")
+    .update({ read_at: new Date().toISOString() }).in("id", ids).is("read_at", null);
+  if (error) throw error;
+}
+
+export function watchMyNotifications(onChange: () => void) {
+  const channel = supabase.channel("my-notifications")
+    .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, onChange)
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
 }
 
 export async function getCloudPlanHost(creatorId: string) {
