@@ -204,6 +204,31 @@ export async function submitCloudReport(groupId: string, reason: string) {
 export async function currentCloudUserId() {
   return (await supabase.auth.getUser()).data.user?.id ?? null;
 }
+export async function getCloudAccountSummary(signOut = false) {
+  if (signOut) {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    return null as never;
+  }
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  if (!user) throw new Error("Sign in required");
+  const [profileResult, trustResult] = await Promise.all([
+    supabase.from("profiles").select("username").eq("id", user.id).maybeSingle(),
+    supabase.from("trust_assertions").select("face_verified,attended_plans").eq("user_id", user.id).maybeSingle(),
+  ]);
+  if (profileResult.error) throw profileResult.error;
+  if (trustResult.error) throw trustResult.error;
+  return {
+    username: profileResult.data?.username ?? user.user_metadata?.username ?? "",
+    email: user.email ?? "",
+    emailVerified: !!user.email_confirmed_at,
+    gender: user.user_metadata?.gender ?? "prefer_not_to_say",
+    age: Number(user.user_metadata?.declared_age) || null,
+    faceVerified: !!trustResult.data?.face_verified,
+    attendedPlans: trustResult.data?.attended_plans ?? 0,
+  };
+}
 export function watchCloudGroups(onChange: () => void) {
   const channel = supabase
     .channel("nook-groups")

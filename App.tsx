@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  BackHandler,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -59,6 +60,7 @@ import {
   requestCloudMembership,
   requestCloudConnection,
   hasCloudConnection,
+  getCloudAccountSummary,
   submitCloudReport,
   submitCloudSafetyRating,
   watchCloudGroups,
@@ -238,6 +240,14 @@ function Nook() {
         ),
       );
   }, [profile]);
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (tab === "Discover") return false;
+      setTab("Discover");
+      return true;
+    });
+    return () => subscription.remove();
+  }, [tab]);
   const allPlans = useMemo(() => [...localPlans, ...hangouts], [localPlans]);
   const visible = useMemo(
     () =>
@@ -263,6 +273,18 @@ function Nook() {
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8F6EF" />
       <View style={styles.shell}>
+        {tab !== "Discover" && (
+          <View style={styles.screenHeader}>
+            <TouchableOpacity onPress={() => setTab("Discover")} style={styles.backButton}>
+              <Text style={styles.backIcon}>‹</Text>
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.screenEyebrow}>NOOK</Text>
+              <Text style={styles.screenTitle}>{tab}</Text>
+            </View>
+            <View style={styles.miniBrand}><Text style={styles.miniBrandText}>⌂</Text></View>
+          </View>
+        )}
         {tab === "Discover" && (
           <Discover
             visible={visible}
@@ -1402,6 +1424,8 @@ function Profile({
   const [mode, setMode] = useState<"profile" | "show" | "scan">("profile");
   const [nonce, setNonce] = useState(Crypto.randomUUID());
   const [cloudQr, setCloudQr] = useState<{token:string;ownerId:string;expiresAt:string}|null>(null);
+  const [account, setAccount] = useState<{username:string;email:string;emailVerified:boolean;gender:string;age:number|null;faceVerified:boolean;attendedPlans:number}|null>(null);
+  useEffect(() => { getCloudAccountSummary().then(setAccount).catch(() => setAccount(null)); }, []);
   useEffect(() => { if (mode === "show") createConnectionQrToken().then(setCloudQr).catch(() => {
     Alert.alert("Could not create QR", "Connect to the internet and try again."); setMode("profile");
   }); }, [mode, nonce]);
@@ -1447,15 +1471,14 @@ function Profile({
       />
     );
   return (
-    <ScrollView contentContainerStyle={styles.page}>
-      <Text style={styles.h1}>Your colourful corner</Text>
+    <ScrollView contentContainerStyle={[styles.page, { paddingTop: 8, paddingBottom: 118 }]} showsVerticalScrollIndicator={false}>
       <View style={styles.profileCard}>
         <View style={styles.profileGlow}>
           <View style={styles.bigAvatar}>
             <Text style={styles.bigAvatarText}>{initial}</Text>
           </View>
           <View style={styles.verified}>
-            <Text style={styles.verifiedText}>Local profile</Text>
+            <Text style={styles.verifiedText}>{account?.emailVerified ? "✓ Email verified" : "Local profile"}</Text>
           </View>
         </View>
         <Text style={styles.profileName}>{profile.name}</Text>
@@ -1465,6 +1488,7 @@ function Profile({
         <Text style={styles.profileLocation}>
           📍 {profile.zone}, {profile.city} · {profile.languages}
         </Text>
+        {account?.username ? <Text style={styles.profileUsername}>@{account.username}</Text> : null}
         <View style={styles.qr}>
           <Text style={styles.qrMark}>▦</Text>
           <View style={{ flex: 1 }}>
@@ -1490,7 +1514,12 @@ function Profile({
           </TouchableOpacity>
         </View>
       </View>
-      <Text style={styles.sectionTitle}>My vibe</Text>
+      <View style={styles.profileStats}>
+        <View style={styles.profileStat}><Text style={styles.profileStatValue}>{account?.attendedPlans ?? 0}</Text><Text style={styles.profileStatLabel}>Plans joined</Text></View>
+        <View style={styles.profileStat}><Text style={styles.profileStatValue}>{profile.interests.split(",").filter(Boolean).length}</Text><Text style={styles.profileStatLabel}>Interests</Text></View>
+        <View style={styles.profileStat}><Text style={styles.profileStatValue}>{account?.age ?? "18+"}</Text><Text style={styles.profileStatLabel}>Age</Text></View>
+      </View>
+      <Text style={styles.sectionTitle}>My interests</Text>
       <View style={styles.wrap}>
         {profile.interests.split(",").map((x) => (
           <View key={x} style={styles.colorChip}>
@@ -1498,18 +1527,29 @@ function Profile({
           </View>
         ))}
       </View>
-      <TouchableOpacity onPress={onEdit} style={styles.editButton}>
-        <Text style={styles.editText}>Edit local profile</Text>
-      </TouchableOpacity>
-      <View style={styles.safety}>
-        <Text style={styles.safetyTitle}>Trust & privacy</Text>
-        <Text style={styles.meta}>
-          A scan creates a pending local connection. It does not reveal contact
-          details or prove global identity.
-        </Text>
+      <Text style={styles.sectionTitle}>Trust progress</Text>
+      <View style={styles.trustPanel}>
+        <TrustRow icon="✉" title="Email" value={account?.emailVerified ? "Verified" : "Pending"} done={!!account?.emailVerified} />
+        <TrustRow icon="☺" title="Face approval" value={account?.faceVerified ? "Approved" : "Not started"} done={!!account?.faceVerified} />
+        <TrustRow icon="☎" title="Phone number" value="Coming next" done={false} />
+        <TrustRow icon="✓" title="Trusted trip access" value={`${account?.attendedPlans ?? 0}/3 plans`} done={(account?.attendedPlans ?? 0) >= 3} last />
       </View>
+      <Text style={styles.sectionTitle}>Account & privacy</Text>
+      <View style={styles.accountPanel}>
+        <Text style={styles.accountLabel}>SIGNED IN AS</Text>
+        <Text style={styles.accountValue}>{account?.email || "Loading account…"}</Text>
+        <Text style={styles.accountHint}>Gender: {account?.gender?.replaceAll("_", " ") || "not shared"} · Contact details stay hidden until you choose to share.</Text>
+      </View>
+      <TouchableOpacity onPress={onEdit} style={styles.editButton}><Text style={styles.editText}>Edit profile</Text></TouchableOpacity>
+      <TouchableOpacity onPress={() => Alert.alert("Sign out?", "Your local profile stays on this phone.", [{text:"Cancel",style:"cancel"},{text:"Sign out",style:"destructive",onPress:()=>getCloudAccountSummary(true)}])} style={styles.signOutButton}>
+        <Text style={styles.signOutText}>Sign out</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
+}
+
+function TrustRow({icon,title,value,done,last=false}:{icon:string;title:string;value:string;done:boolean;last?:boolean}) {
+  return <View style={[styles.trustRow, last && {borderBottomWidth:0}]}><Text style={styles.trustRowIcon}>{icon}</Text><View style={{flex:1}}><Text style={styles.trustRowTitle}>{title}</Text><Text style={styles.trustRowValue}>{value}</Text></View><Text style={[styles.trustCheck, done && styles.trustCheckDone]}>{done ? "✓" : "○"}</Text></View>;
 }
 
 function QRScanner({
@@ -1652,7 +1692,7 @@ function Nav({
       {items.map((i) => (
         <TouchableOpacity
           key={i.name}
-          style={styles.navItem}
+          style={[styles.navItem, active === i.name && styles.navItemActive]}
           onPress={() => onChange(i.name)}
         >
           <Text style={[styles.navIcon, active === i.name && styles.navActive]}>
@@ -1671,6 +1711,13 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8F6EF" },
   shell: { flex: 1 },
   page: { padding: 20, paddingTop: 24 },
+  screenHeader: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 8 },
+  backButton: { width: 42, height: 42, borderRadius: 15, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#E8E4D9" },
+  backIcon: { fontSize: 34, lineHeight: 35, color: "#17211F", marginTop: -3 },
+  screenEyebrow: { fontSize: 10, fontWeight: "900", letterSpacing: 1.7, color: "#247064" },
+  screenTitle: { fontSize: 23, fontWeight: "900", color: "#17211F", marginTop: 1 },
+  miniBrand: { width: 38, height: 38, borderRadius: 14, backgroundColor: "#F0AF49", alignItems: "center", justifyContent: "center" },
+  miniBrandText: { color: "#174E45", fontWeight: "900", fontSize: 20 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1788,7 +1835,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
     paddingHorizontal: 7,
   },
-  navItem: { alignItems: "center", minWidth: 65 },
+  navItem: { alignItems: "center", justifyContent: "center", minWidth: 62, height: 54, borderRadius: 18 },
+  navItemActive: { backgroundColor: "#2A3733" },
   navIcon: { fontSize: 21, color: "#8FA09A" },
   navText: { fontSize: 10, fontWeight: "700", marginTop: 3, color: "#8FA09A" },
   navActive: { color: "#F0AF49" },
@@ -1867,6 +1915,11 @@ const styles = StyleSheet.create({
   profileName: { fontSize: 28, fontWeight: "900", color: "white" },
   profileBio: { fontSize: 15, color: "#E8DFFF", marginTop: 5 },
   profileLocation: { fontSize: 13, color: "#D4C9F1", marginTop: 10 },
+  profileUsername: { fontSize: 13, color: "#F8C96F", fontWeight: "900", marginTop: 7 },
+  profileStats: { flexDirection: "row", backgroundColor: "#FFFFFF", borderRadius: 20, marginTop: 14, paddingVertical: 15, borderWidth: 1, borderColor: "#ECEAE3" },
+  profileStat: { flex: 1, alignItems: "center", borderRightWidth: 1, borderRightColor: "#ECEAE3" },
+  profileStatValue: { color: "#17211F", fontSize: 20, fontWeight: "900" },
+  profileStatLabel: { color: "#7A827F", fontSize: 10, fontWeight: "700", marginTop: 3 },
   qr: {
     backgroundColor: "#FFFFFF",
     borderRadius: 18,
@@ -2036,6 +2089,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   editText: { fontWeight: "800", color: "#503A82" },
+  trustPanel: { backgroundColor: "#FFFFFF", borderRadius: 21, paddingHorizontal: 16, borderWidth: 1, borderColor: "#ECEAE3" },
+  trustRow: { minHeight: 67, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, borderBottomColor: "#ECEAE3" },
+  trustRowIcon: { width: 35, height: 35, borderRadius: 12, backgroundColor: "#E8F4EF", textAlign: "center", textAlignVertical: "center", color: "#247064", fontSize: 17, fontWeight: "900" },
+  trustRowTitle: { fontSize: 14, fontWeight: "900", color: "#17211F" },
+  trustRowValue: { fontSize: 12, color: "#7A827F", marginTop: 2 },
+  trustCheck: { fontSize: 20, color: "#B6BCBA", fontWeight: "900" },
+  trustCheckDone: { color: "#247064" },
+  accountPanel: { backgroundColor: "#FFF1D8", borderRadius: 20, padding: 17 },
+  accountLabel: { fontSize: 10, letterSpacing: 1.2, color: "#8B6226", fontWeight: "900" },
+  accountValue: { fontSize: 16, color: "#402E12", fontWeight: "900", marginTop: 5 },
+  accountHint: { fontSize: 12, color: "#765D37", lineHeight: 18, marginTop: 8, textTransform: "capitalize" },
+  signOutButton: { alignItems: "center", paddingVertical: 14, marginTop: 9 },
+  signOutText: { color: "#A04437", fontWeight: "800" },
   qrActions: { flexDirection: "row", gap: 10, marginTop: 14 },
   qrAction: {
     flex: 1,
