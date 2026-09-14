@@ -3,19 +3,22 @@
     "name": "Nook",
     "slug": "nook",
     "scheme": "nook",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "icon": "./assets/icon-v3.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.immrtldragon.nook",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon-v3.png",
         "backgroundColor": "#F4F1E8"
       },
       "permissions": ["CAMERA"]
     },
-    "plugins": [["expo-camera", {"cameraPermission": "Allow Nook to scan a connection QR code", "recordAudioAndroid": false, "barcodeScannerEnabled": true}]]
+    "plugins": [
+      ["expo-camera", {"cameraPermission": "Allow Nook to scan a connection QR code", "recordAudioAndroid": false, "barcodeScannerEnabled": true}],
+      ["expo-notifications", {"color": "#247064", "defaultChannel": "plan-reminders"}]
+    ]
   }
 }

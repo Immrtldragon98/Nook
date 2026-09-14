@@ -46,6 +46,7 @@ import {
 } from "./src/database";
 import { QRCodeMatrix } from "./src/QRCodeMatrix";
 import { AuthGate } from "./src/AuthGate";
+import { enablePlanNotifications, notificationPermissionGranted, syncApprovedPlanReminders } from "./src/notifications";
 import { cloudEnabled } from "./src/supabase";
 import {
   createCloudGroup,
@@ -1375,16 +1376,23 @@ function Plans({ joined, onBrowse }: { joined: (number | string)[]; onBrowse: ()
   const [cloudRequests, setCloudRequests] = useState<any[]>([]);
   const [hostRequests, setHostRequests] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [remindersEnabled, setRemindersEnabled] = useState(false);
   async function refreshRequests() { const [mine, hosted, alerts] = await Promise.all([listMyCloudPlanRequests(),listMyHostedPlanRequests(),listMyNotifications()]); setCloudRequests(mine); setHostRequests(hosted); setNotifications(alerts); }
-  useEffect(() => { refreshRequests().catch(() => {}); return watchMyNotifications(() => refreshRequests().catch(() => {})); }, [joined]);
+  useEffect(() => { notificationPermissionGranted().then(setRemindersEnabled).catch(() => {}); refreshRequests().catch(() => {}); return watchMyNotifications(() => refreshRequests().catch(() => {})); }, [joined]);
   const plans = hangouts.filter((h) => joined.includes(h.id));
   const cloudPlans = cloudRequests.filter((r) => r.plan).map((r) => ({...r.plan, requestStatus:r.status}));
+  useEffect(() => { if (remindersEnabled) syncApprovedPlanReminders(cloudPlans).catch(() => {}); }, [remindersEnabled, cloudRequests]);
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <Text style={styles.h1}>My plans</Text>
       <Text style={styles.intro}>
         Requests and confirmed meetups appear here.
       </Text>
+      <View style={styles.reminderCard}>
+        <View style={styles.reminderIcon}><Text style={styles.reminderIconText}>🔔</Text></View>
+        <View style={{flex:1}}><Text style={styles.alertTitle}>Plan reminders</Text><Text style={styles.meta}>{remindersEnabled ? "Android will remind you 2 hours before approved activities." : "Enable private reminders on this phone."}</Text></View>
+        {!remindersEnabled && <TouchableOpacity style={styles.reminderButton} onPress={async()=>{const enabled=await enablePlanNotifications();setRemindersEnabled(enabled);if(!enabled) Alert.alert("Notifications are off","You can enable Nook notifications later from Android settings.");}}><Text style={styles.reminderButtonText}>Enable</Text></TouchableOpacity>}
+      </View>
       {notifications.length > 0 && <View style={styles.alertPanel}>
         <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Updates</Text>{notifications.some((n) => !n.read_at) && <TouchableOpacity onPress={async()=>{await markNotificationsRead(notifications.filter((n)=>!n.read_at).map((n)=>n.id));await refreshRequests();}}><Text style={styles.alertAction}>Mark read</Text></TouchableOpacity>}</View>
         {notifications.slice(0,4).map((n) => <View key={n.id} style={[styles.alertRow, !n.read_at && styles.alertUnread]}><Text style={styles.alertIcon}>{n.kind === "plan_request" ? "👋" : n.kind === "plan_approved" ? "✓" : "•"}</Text><View style={{flex:1}}><Text style={styles.alertTitle}>{n.title}</Text><Text style={styles.meta}>{n.body}</Text></View></View>)}
@@ -2161,6 +2169,11 @@ const styles = StyleSheet.create({
   alertIcon: { width: 28, height: 28, borderRadius: 10, backgroundColor: "#F0AF49", textAlign: "center", textAlignVertical: "center", fontWeight: "900" },
   alertTitle: { color: "#17211F", fontWeight: "900", fontSize: 14 },
   alertAction: { color: "#247064", fontWeight: "900", fontSize: 12 },
+  reminderCard: { flexDirection: "row", alignItems: "center", gap: 11, backgroundColor: "#FFF1D8", borderRadius: 18, padding: 14, marginBottom: 17 },
+  reminderIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: "#F8C96F", alignItems: "center", justifyContent: "center" },
+  reminderIconText: { fontSize: 18 },
+  reminderButton: { backgroundColor: "#247064", borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10 },
+  reminderButtonText: { color: "#FFF", fontSize: 12, fontWeight: "900" },
   requiredList: {
     backgroundColor: "#EEF0FF",
     padding: 15,
