@@ -56,6 +56,11 @@ import {
   initializeCloudIdentity,
   listCloudGroups,
   listCloudPlans,
+  listMyCloudPlanRequests,
+  listMyHostedPlanRequests,
+  decideCloudPlanRequest,
+  requestCloudPlan,
+  getCloudPlanHost,
   listCloudHostRequests,
   requestCloudMembership,
   requestCloudConnection,
@@ -83,6 +88,7 @@ type Hangout = {
   audience: string;
   safety: number;
   trustedOnly?: boolean;
+  creatorId?: string;
 };
 
 const categories = [
@@ -200,6 +206,7 @@ export default function App() {
 function Nook() {
   const db = useSQLiteContext();
   const [tab, setTab] = useState<Tab>("Discover");
+  const [selectedPlan, setSelectedPlan] = useState<Hangout | null>(null);
   const [category, setCategory] = useState("All");
   const [joined, setJoined] = useState<(number | string)[]>([]);
   const [localPlans, setLocalPlans] = useState<Hangout[]>([]);
@@ -212,7 +219,7 @@ function Nook() {
       setLocalPlans(rows.map((p) => ({ id:p.id, emoji:p.trusted_only?"🧳":"✨", category:p.category,
         title:p.title, area:p.area, time:p.starts_at, host:"Nook member", spots:p.spots,
         language:p.language, audience:p.trusted_only?"Trusted members only":"Open plan", safety:0,
-        trustedOnly:p.trusted_only })));
+        trustedOnly:p.trusted_only, creatorId:p.creator_id })));
     } catch {
       const rows = await listPlans(db);
       setLocalPlans(rows.map(toHangout));
@@ -273,9 +280,17 @@ function Nook() {
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8F6EF" />
       <View style={styles.shell}>
+        {selectedPlan ? (
+          <ActivityDetail plan={selectedPlan} onClose={() => setSelectedPlan(null)} onRequested={(id) => {
+            setJoined((current) => current.includes(id) ? current : [...current, id]);
+            setSelectedPlan(null);
+            setTab("My Plans");
+          }} />
+        ) : <>
         {tab === "Discover" && (
           <Discover
             profile={profile}
+            onSelect={setSelectedPlan}
             visible={visible}
             category={category}
             setCategory={setCategory}
@@ -297,6 +312,7 @@ function Nook() {
           <Profile profile={profile} onEdit={() => setProfile(null)} />
         )}
         <Nav active={tab} onChange={setTab} />
+        </>}
       </View>
     </SafeAreaView>
   );
@@ -319,7 +335,7 @@ function toHangout(p: StoredPlan): Hangout {
   };
 }
 
-function Discover({ profile, visible, category, setCategory, joined, setJoined }: any) {
+function Discover({ profile, visible, category, setCategory, joined, setJoined, onSelect }: any) {
   return (
     <ScrollView
       contentContainerStyle={styles.page}
@@ -392,7 +408,7 @@ function Discover({ profile, visible, category, setCategory, joined, setJoined }
               <View><Text style={styles.host}>Hosted by {h.host}</Text><Text style={styles.spotsText}>{h.spots} spots remaining</Text></View>
               <TouchableOpacity
                 disabled={isJoined}
-                onPress={() => setJoined([...joined, h.id])}
+                onPress={() => onSelect(h)}
                 style={[
                   styles.join,
                   h.trustedOnly && styles.tripJoin,
@@ -404,7 +420,7 @@ function Discover({ profile, visible, category, setCategory, joined, setJoined }
                     ? "Requested"
                     : h.trustedOnly
                       ? "Request trip"
-                      : "Ask to join"}
+                      : "View details"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1293,16 +1309,56 @@ function Toggle({
   );
 }
 
+function ActivityDetail({ plan, onClose, onRequested }: { plan: Hangout; onClose: () => void; onRequested: (id: number | string) => void }) {
+  const [host, setHost] = useState(plan.host);
+  const [busy, setBusy] = useState(false);
+  const [trust, setTrust] = useState<{faceVerified:boolean;attendedPlans:number}|null>(null);
+  useEffect(() => {
+    getCloudAccountSummary().then((a) => setTrust({faceVerified:a.faceVerified,attendedPlans:a.attendedPlans})).catch(() => {});
+    if (plan.creatorId) getCloudPlanHost(plan.creatorId).then((p) => p?.display_name && setHost(p.display_name)).catch(() => {});
+  }, [plan.id]);
+  const eligible = !plan.trustedOnly || (!!trust?.faceVerified && trust.attendedPlans >= 3);
+  async function request() {
+    if (!eligible) return Alert.alert("Trusted activity", "Complete face approval and attend three local activities first.");
+    setBusy(true);
+    try {
+      if (typeof plan.id === "string") await requestCloudPlan(plan.id);
+      onRequested(plan.id);
+    } catch (e:any) {
+      if (e.code === "23505") onRequested(plan.id);
+      else Alert.alert("Could not request", e.message ?? "Please try again.");
+    } finally { setBusy(false); }
+  }
+  return <ScrollView contentContainerStyle={styles.detailPage} showsVerticalScrollIndicator={false}>
+    <TouchableOpacity onPress={onClose} style={styles.detailBack}><Text style={styles.detailBackText}>‹  Discover</Text></TouchableOpacity>
+    <View style={styles.detailHero}><Text style={styles.detailEmoji}>{plan.emoji}</Text><Text style={styles.detailCategory}>{plan.category.toUpperCase()}</Text><Text style={styles.detailTitle}>{plan.title}</Text><Text style={styles.detailTime}>{plan.time}</Text></View>
+    <View style={styles.detailCard}><Text style={styles.detailLabel}>WHERE</Text><Text style={styles.detailValue}>📍 {plan.area}</Text><Text style={styles.detailNote}>Only the approximate public area is shown before approval.</Text></View>
+    <View style={styles.detailCard}><Text style={styles.detailLabel}>HOST</Text><Text style={styles.detailValue}>{host}</Text><Text style={styles.detailNote}>{plan.language} · {plan.spots} spots remaining</Text></View>
+    <View style={styles.detailCard}><Text style={styles.detailLabel}>SAFETY BEFORE CHAT</Text><View style={styles.safetyLine}><Text style={styles.safetyStrong}>{plan.safety ? `★ ${plan.safety}` : "New activity"}</Text><Text style={styles.detailNote}>{plan.audience}</Text></View><Text style={styles.detailNote}>Your phone number and exact location stay private. Meet first in a public place.</Text></View>
+    {plan.trustedOnly && <View style={[styles.detailCard, styles.lockedCard]}><Text style={styles.detailValue}>🔒 Trusted members only</Text><Text style={styles.detailNote}>{eligible ? "You meet the current trust requirements." : `Face approval and 3 attended plans required. Current: ${trust?.attendedPlans ?? 0}/3.`}</Text></View>}
+    <TouchableOpacity disabled={busy} onPress={request} style={[styles.primaryWide, !eligible && styles.disabledAction]}><Text style={styles.primaryText}>{busy ? "Sending request…" : eligible ? "Request to join" : "Complete trust checks first"}</Text></TouchableOpacity>
+    <Text style={styles.detailFootnote}>The host reviews your request. Contact details are never shared automatically.</Text>
+  </ScrollView>;
+}
+
 function Plans({ joined, onBrowse }: { joined: (number | string)[]; onBrowse: () => void }) {
+  const [cloudRequests, setCloudRequests] = useState<any[]>([]);
+  const [hostRequests, setHostRequests] = useState<any[]>([]);
+  async function refreshRequests() { const [mine, hosted] = await Promise.all([listMyCloudPlanRequests(),listMyHostedPlanRequests()]); setCloudRequests(mine); setHostRequests(hosted); }
+  useEffect(() => { refreshRequests().catch(() => {}); }, [joined]);
   const plans = hangouts.filter((h) => joined.includes(h.id));
+  const cloudPlans = cloudRequests.filter((r) => r.plan).map((r) => ({...r.plan, requestStatus:r.status}));
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <Text style={styles.h1}>My plans</Text>
       <Text style={styles.intro}>
         Requests and confirmed meetups appear here.
       </Text>
-      {plans.length ? (
-        plans.map((h) => (
+      {hostRequests.length > 0 && <><Text style={styles.sectionTitle}>Requests to your activities</Text>{hostRequests.map((r) => <View key={`${r.plan_id}-${r.user_id}`} style={styles.memberRow}><Text style={styles.kindTitle}>{r.displayName}</Text><Text style={styles.meta}>{r.plan?.title} · {r.status}</Text>{r.status === "pending" && <View style={styles.memberActions}><TouchableOpacity style={styles.approveButton} onPress={async()=>{await decideCloudPlanRequest(r.plan_id,r.user_id,"approved");await refreshRequests();}}><Text style={styles.primaryText}>Approve</Text></TouchableOpacity><TouchableOpacity style={styles.miniButton} onPress={async()=>{await decideCloudPlanRequest(r.plan_id,r.user_id,"rejected");await refreshRequests();}}><Text style={styles.editText}>Reject</Text></TouchableOpacity></View>}</View>)}</>}
+      {(plans.length > 0 || cloudPlans.length > 0) && <Text style={styles.sectionTitle}>Your requests</Text>}
+      {plans.length || cloudPlans.length ? (<>
+        {cloudPlans.map((h) => <View key={h.id} style={styles.card}><Text style={styles.cardTitle}>{h.trusted_only ? "🧳" : "✨"} {h.title}</Text><Text style={styles.meta}>{h.starts_at} · {h.area}</Text><View style={styles.pending}><Text style={styles.pendingText}>{h.requestStatus === "pending" ? "Waiting for host approval" : h.requestStatus}</Text></View></View>)}
+        {plans.filter((h) => typeof h.id !== "string").map((h) => (
           <View key={h.id} style={styles.card}>
             <Text style={styles.cardTitle}>
               {h.emoji} {h.title}
@@ -1314,7 +1370,7 @@ function Plans({ joined, onBrowse }: { joined: (number | string)[]; onBrowse: ()
               <Text style={styles.pendingText}>Waiting for host approval</Text>
             </View>
           </View>
-        ))
+        ))}</>
       ) : (
         <Empty
           emoji="☀"
@@ -1695,6 +1751,23 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8F6EF" },
   shell: { flex: 1 },
   page: { padding: 20, paddingTop: 24 },
+  detailPage: { padding: 20, paddingTop: 16, paddingBottom: 40 },
+  detailBack: { alignSelf: "flex-start", paddingVertical: 10, paddingRight: 20 },
+  detailBackText: { color: "#247064", fontWeight: "900", fontSize: 15 },
+  detailHero: { backgroundColor: "#503A82", borderRadius: 28, padding: 24, marginTop: 8, marginBottom: 14 },
+  detailEmoji: { fontSize: 44, marginBottom: 20 },
+  detailCategory: { color: "#F8C96F", fontSize: 11, fontWeight: "900", letterSpacing: 1.5 },
+  detailTitle: { color: "#FFF", fontSize: 30, lineHeight: 35, fontWeight: "900", marginTop: 8 },
+  detailTime: { color: "#E8DFFF", fontSize: 16, fontWeight: "700", marginTop: 12 },
+  detailCard: { backgroundColor: "#FFF", borderRadius: 20, padding: 17, marginBottom: 11, borderWidth: 1, borderColor: "#ECEAE3" },
+  detailLabel: { color: "#7A827F", fontSize: 10, fontWeight: "900", letterSpacing: 1.2, marginBottom: 7 },
+  detailValue: { color: "#17211F", fontSize: 17, fontWeight: "900" },
+  detailNote: { color: "#68716D", fontSize: 12, lineHeight: 18, marginTop: 5 },
+  safetyLine: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  safetyStrong: { color: "#247064", fontSize: 17, fontWeight: "900" },
+  lockedCard: { backgroundColor: "#FFF1D8", borderColor: "#F1D49B" },
+  disabledAction: { backgroundColor: "#8A918E" },
+  detailFootnote: { color: "#7A827F", fontSize: 11, lineHeight: 17, textAlign: "center", marginTop: 10 },
   screenHeader: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 8 },
   backButton: { width: 42, height: 42, borderRadius: 15, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#E8E4D9" },
   backIcon: { fontSize: 34, lineHeight: 35, color: "#17211F", marginTop: -3 },

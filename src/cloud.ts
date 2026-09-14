@@ -25,6 +25,7 @@ export type CloudPlan = {
   area: string; starts_at: string; language: string; spots: number;
   trusted_only: boolean; created_at: string;
 };
+export type CloudPlanRequest = { plan_id: string; status: string; created_at: string; plan: CloudPlan };
 
 export async function listCloudPlans(city: string, limit = 50) {
   const { data, error } = await supabase.from("plans").select("*")
@@ -40,6 +41,50 @@ export async function createCloudPlan(plan: Omit<CloudPlan, "id" | "creator_id" 
     .insert({ ...plan, creator_id: user.id }).select().single();
   if (error) throw error;
   return data as CloudPlan;
+}
+
+export async function requestCloudPlan(planId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const { error } = await supabase.from("plan_requests").insert({ plan_id: planId, user_id: user.id });
+  if (error) throw error;
+}
+
+export async function listMyCloudPlanRequests() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const { data, error } = await supabase.from("plan_requests")
+    .select("plan_id,status,created_at,plan:plans(*)")
+    .eq("user_id", user.id).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as unknown as CloudPlanRequest[];
+}
+
+export async function listMyHostedPlanRequests() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const { data: plans, error: planError } = await supabase.from("plans").select("id,title,starts_at,area").eq("creator_id", user.id);
+  if (planError) throw planError;
+  const ids = (plans ?? []).map((p) => p.id);
+  if (!ids.length) return [];
+  const { data: requests, error } = await supabase.from("plan_requests").select("plan_id,user_id,status,created_at").in("plan_id", ids).order("created_at", {ascending:false});
+  if (error) throw error;
+  const userIds = [...new Set((requests ?? []).map((r) => r.user_id))];
+  const { data: profiles, error: profileError } = userIds.length ? await supabase.from("profiles").select("id,display_name").in("id", userIds) : {data:[],error:null};
+  if (profileError) throw profileError;
+  return (requests ?? []).map((r) => ({...r, plan:plans?.find((p) => p.id===r.plan_id), displayName:profiles?.find((p) => p.id===r.user_id)?.display_name ?? "Nook member"}));
+}
+
+export async function decideCloudPlanRequest(planId:string,userId:string,status:"approved"|"rejected") {
+  const { error } = await supabase.from("plan_requests").update({status,updated_at:new Date().toISOString()}).eq("plan_id",planId).eq("user_id",userId);
+  if (error) throw error;
+}
+
+export async function getCloudPlanHost(creatorId: string) {
+  const { data, error } = await supabase.from("profiles")
+    .select("display_name,city,area").eq("id", creatorId).maybeSingle();
+  if (error) throw error;
+  return data as {display_name:string;city:string;area:string}|null;
 }
 
 export async function createConnectionQrToken() {

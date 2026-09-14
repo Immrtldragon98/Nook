@@ -178,6 +178,34 @@ grant select,insert on public.connection_qr_tokens to authenticated;
 grant select,insert,update on public.connections to authenticated;
 alter publication supabase_realtime add table public.plans;
 
+-- One durable request per member and activity. Members see their own request;
+-- hosts can review only requests for plans they created.
+create table public.plan_requests (
+  plan_id uuid not null references public.plans(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending','approved','rejected','cancelled')),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  primary key(plan_id,user_id)
+);
+create index plan_requests_user_id_idx on public.plan_requests(user_id);
+alter table public.plan_requests enable row level security;
+create policy plan_requests_read_self_or_host on public.plan_requests for select to authenticated
+using ((select auth.uid())=user_id or exists(select 1 from public.plans p where p.id=plan_id and p.creator_id=(select auth.uid())));
+create policy plan_requests_create_self on public.plan_requests for insert to authenticated
+with check ((select auth.uid())=user_id and status='pending' and exists(
+  select 1 from public.plans p where p.id=plan_id and p.creator_id<>(select auth.uid())
+  and (not p.trusted_only or exists(
+    select 1 from public.trust_assertions t where t.user_id=(select auth.uid())
+    and t.adult_verified and t.face_verified and t.attended_plans>=3
+    and (t.restricted_until is null or t.restricted_until<now())
+  ))
+));
+create policy plan_requests_host_decision on public.plan_requests for update to authenticated
+using (exists(select 1 from public.plans p where p.id=plan_id and p.creator_id=(select auth.uid())))
+with check (exists(select 1 from public.plans p where p.id=plan_id and p.creator_id=(select auth.uid())));
+grant select,insert,update on public.plan_requests to authenticated;
+alter publication supabase_realtime add table public.plan_requests;
+
 -- Account identity: username is public; age/gender and login email remain private.
 create extension if not exists citext;
 alter extension citext set schema extensions;
