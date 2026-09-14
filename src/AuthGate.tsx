@@ -48,18 +48,19 @@ function Auth() {
   const [age, setAge] = useState("");
   const [gender, setGender] = useState("prefer_not_to_say");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   async function submit(mode: "in" | "up") {
     if (password.length < 8 || (mode === "in" ? !identifier.trim() : !email.trim()))
       return Alert.alert(
         "Check details",
         "Use a valid email and a password of at least 8 characters.",
       );
-    setBusy(true);
     if (mode === "up" && !/^[a-zA-Z][a-zA-Z0-9_]{2,19}$/.test(username))
       return Alert.alert("Check username", "Use 3–20 letters, numbers or underscores; start with a letter.");
     const declaredAge = Number(age);
     if (mode === "up" && (!Number.isInteger(declaredAge) || declaredAge < 18 || declaredAge > 100))
       return Alert.alert("Check age", "Nook currently supports adults aged 18–100.");
+    setBusy(true);
     let error: any = null;
     if (mode === "in") {
       const result = await supabase.functions.invoke("username-login", {
@@ -109,10 +110,13 @@ function Auth() {
           </TouchableOpacity>
         </View>
         {mode === "up" ? <>
+          <Text style={s.fieldLabel}>Username</Text>
           <TextInput value={username} onChangeText={setUsername} autoCapitalize="none"
             placeholder="Username (example: Logan)" style={s.input} />
+          <Text style={s.fieldLabel}>Email</Text>
           <TextInput value={email} onChangeText={setEmail} autoCapitalize="none"
             keyboardType="email-address" placeholder="Email" style={s.input} />
+          <Text style={s.fieldLabel}>Age</Text>
           <TextInput value={age} onChangeText={setAge} keyboardType="number-pad"
             placeholder="Age (18+)" style={s.input} />
           <Text style={s.fieldLabel}>Gender</Text>
@@ -120,16 +124,17 @@ function Auth() {
             {[['woman','Woman'],['man','Man'],['non_binary','Non-binary'],['prefer_not_to_say','Skip']].map(([value,label]) => (
               <TouchableOpacity key={value} onPress={() => setGender(value)}
                 style={[s.genderChip, gender === value && s.genderActive]}>
-                <Text style={[s.genderText, gender === value && s.genderTextActive]}>{label}</Text>
+                <Text style={[s.genderText, gender === value && s.genderTextActive]}>{value === "prefer_not_to_say" ? "Prefer not to say" : label}</Text>
               </TouchableOpacity>
             ))}
           </View>
-        </> : <TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none"
-          placeholder="Username or email" style={s.input} />}
+        </> : <><Text style={s.fieldLabel}>Username or email</Text><TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none"
+          placeholder="Logan or name@email.com" style={s.input} /></>}
+        <View style={s.passwordLabelRow}><Text style={s.fieldLabel}>Password</Text><TouchableOpacity onPress={() => setShowPassword(!showPassword)}><Text style={s.showText}>{showPassword ? "Hide" : "Show"}</Text></TouchableOpacity></View>
         <TextInput
           value={password}
           onChangeText={setPassword}
-          secureTextEntry
+          secureTextEntry={!showPassword}
           placeholder="Password (8+ characters)"
           style={s.input}
         />
@@ -143,7 +148,7 @@ function Auth() {
           </Text>
         </TouchableOpacity>
         <Text style={s.note}>
-          {mode === "up" ? "We may ask you to confirm your email before signing in." : "Use the email and password you registered with."}
+          {mode === "up" ? "Nook is for adults 18+. We’ll email you a verification link." : "Use your username or email and registered password."}
         </Text>
       </View>
       </ScrollView>
@@ -191,7 +196,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     marginBottom: 12,
   },
-  fieldLabel: { color: "#4F5955", fontWeight: "800", fontSize: 12, marginBottom: 8 },
+  fieldLabel: { color: "#4F5955", fontWeight: "800", fontSize: 12, marginBottom: 7 },
+  passwordLabelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  showText: { color: "#247064", fontWeight: "900", fontSize: 12, marginBottom: 7 },
   genderRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 12 },
   genderChip: { borderWidth: 1, borderColor: "#DDDAD0", borderRadius: 12, paddingHorizontal: 11, paddingVertical: 9 },
   genderActive: { backgroundColor: "#E3F2EC", borderColor: "#247064" },

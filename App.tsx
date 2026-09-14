@@ -69,7 +69,7 @@ import {
   type CloudRequest,
 } from "./src/cloud";
 
-type Tab = "Discover" | "Groups" | "Create" | "Plans" | "Profile";
+type Tab = "Discover" | "Communities" | "Create" | "My Plans" | "Profile";
 type Hangout = {
   id: number | string;
   emoji: string;
@@ -100,7 +100,7 @@ const hangouts: Hangout[] = [
     emoji: "🏸",
     category: "Sports",
     title: "Badminton after work",
-    area: "Anna Nagar",
+    area: "Indiranagar",
     time: "Today · 7:00 PM",
     host: "Arun",
     spots: 2,
@@ -273,20 +273,9 @@ function Nook() {
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8F6EF" />
       <View style={styles.shell}>
-        {tab !== "Discover" && (
-          <View style={styles.screenHeader}>
-            <TouchableOpacity onPress={() => setTab("Discover")} style={styles.backButton}>
-              <Text style={styles.backIcon}>‹</Text>
-            </TouchableOpacity>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.screenEyebrow}>NOOK</Text>
-              <Text style={styles.screenTitle}>{tab}</Text>
-            </View>
-            <View style={styles.miniBrand}><Text style={styles.miniBrandText}>⌂</Text></View>
-          </View>
-        )}
         {tab === "Discover" && (
           <Discover
+            profile={profile}
             visible={visible}
             category={category}
             setCategory={setCategory}
@@ -294,7 +283,7 @@ function Nook() {
             setJoined={setJoined}
           />
         )}
-        {tab === "Groups" && <Groups profile={profile} />}
+        {tab === "Communities" && <Groups profile={profile} />}
         {tab === "Create" && (
           <CreateHub
             onCreated={async () => {
@@ -303,7 +292,7 @@ function Nook() {
             }}
           />
         )}
-        {tab === "Plans" && <Plans joined={joined} />}
+        {tab === "My Plans" && <Plans joined={joined} onBrowse={() => setTab("Discover")} />}
         {tab === "Profile" && profile && (
           <Profile profile={profile} onEdit={() => setProfile(null)} />
         )}
@@ -330,7 +319,7 @@ function toHangout(p: StoredPlan): Hangout {
   };
 }
 
-function Discover({ visible, category, setCategory, joined, setJoined }: any) {
+function Discover({ profile, visible, category, setCategory, joined, setJoined }: any) {
   return (
     <ScrollView
       contentContainerStyle={styles.page}
@@ -338,25 +327,16 @@ function Discover({ visible, category, setCategory, joined, setJoined }: any) {
     >
       <View style={styles.header}>
         <View>
-          <Text style={styles.eyebrow}>BENGALURU ▾</Text>
+          <Text style={styles.eyebrow}>{profile.city.toUpperCase()} ▾</Text>
           <Text style={styles.h1}>Find your people.</Text>
         </View>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>Y</Text>
+          <Text style={styles.avatarText}>{profile.name.slice(0, 1).toUpperCase()}</Text>
         </View>
       </View>
       <Text style={styles.intro}>
         Join something you already want to do—without sharing your number.
       </Text>
-      <View style={styles.trustBanner}>
-        <Text style={styles.trustIcon}>✓</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.trustTitle}>Trusted member</Text>
-          <Text style={styles.trustCopy}>
-            3 attended plans · eligible for local trips
-          </Text>
-        </View>
-      </View>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -378,7 +358,7 @@ function Discover({ visible, category, setCategory, joined, setJoined }: any) {
       </ScrollView>
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>Happening nearby</Text>
-        <Text style={styles.muted}>Approximate areas</Text>
+        <Text style={styles.muted}>{visible.length} activities</Text>
       </View>
       {visible.map((h: Hangout) => {
         const isJoined = joined.includes(h.id);
@@ -390,7 +370,7 @@ function Discover({ visible, category, setCategory, joined, setJoined }: any) {
               </View>
               <View style={styles.pill}>
                 <Text style={styles.pillText}>
-                  ★ {h.safety} · {h.spots} spots
+                  Safety {h.safety ? `★ ${h.safety}` : "new"}
                 </Text>
               </View>
             </View>
@@ -398,7 +378,7 @@ function Discover({ visible, category, setCategory, joined, setJoined }: any) {
             <Text style={styles.audience}>{h.audience}</Text>
             <Text style={styles.meta}>{h.time}</Text>
             <Text style={styles.meta}>
-              {h.area} · {h.language}
+              📍 {h.area} · {h.language}
             </Text>
             {h.trustedOnly && (
               <View style={styles.tripRules}>
@@ -409,7 +389,7 @@ function Discover({ visible, category, setCategory, joined, setJoined }: any) {
               </View>
             )}
             <View style={styles.cardBottom}>
-              <Text style={styles.host}>Hosted by {h.host}</Text>
+              <View><Text style={styles.host}>Hosted by {h.host}</Text><Text style={styles.spotsText}>{h.spots} spots remaining</Text></View>
               <TouchableOpacity
                 disabled={isJoined}
                 onPress={() => setJoined([...joined, h.id])}
@@ -757,22 +737,23 @@ function CloudGroups({ profile }: { profile: LocalProfile }) {
     <ScrollView contentContainerStyle={styles.page}>
       <View style={styles.sectionRow}>
         <View>
-          <Text style={styles.h1}>Groups in {profile.city}</Text>
-          <Text style={styles.intro}>Synced safely across phones.</Text>
+          <Text style={styles.h1}>Communities</Text>
+          <Text style={styles.intro}>Recurring circles in {profile.city}.</Text>
         </View>
         <TouchableOpacity
           onPress={() => setCreating(true)}
           style={styles.smallAdd}
         >
-          <Text style={styles.primaryText}>＋ Group</Text>
+          <Text style={styles.primaryText}>Create</Text>
         </TouchableOpacity>
       </View>
       {groups.length === 0 ? (
         <Empty
           emoji="☁️"
-          title="No synced groups yet"
-          body="Create the first activity group in your city."
-          action="Use + Group above"
+          title="No communities yet"
+          body="Create a recurring circle for people who enjoy the same activity."
+          action="Create a community"
+          onPress={() => setCreating(true)}
         />
       ) : (
         groups.map((g) => {
@@ -1312,11 +1293,11 @@ function Toggle({
   );
 }
 
-function Plans({ joined }: { joined: (number | string)[] }) {
+function Plans({ joined, onBrowse }: { joined: (number | string)[]; onBrowse: () => void }) {
   const plans = hangouts.filter((h) => joined.includes(h.id));
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <Text style={styles.h1}>Your plans</Text>
+      <Text style={styles.h1}>My plans</Text>
       <Text style={styles.intro}>
         Requests and confirmed meetups appear here.
       </Text>
@@ -1340,6 +1321,7 @@ function Plans({ joined }: { joined: (number | string)[] }) {
           title="Nothing planned yet"
           body="Discover a hangout and ask to join. Your exact location is never shared publicly."
           action="Browse activities"
+          onPress={onBrowse}
         />
       )}
     </ScrollView>
@@ -1655,18 +1637,20 @@ function Empty({
   title,
   body,
   action,
+  onPress,
 }: {
   emoji: string;
   title: string;
   body: string;
   action: string;
+  onPress?: () => void;
 }) {
   return (
     <View style={styles.empty}>
       <Text style={styles.emptyEmoji}>{emoji}</Text>
       <Text style={styles.cardTitle}>{title}</Text>
       <Text style={[styles.meta, { textAlign: "center" }]}>{body}</Text>
-      <TouchableOpacity style={styles.primary}>
+      <TouchableOpacity style={styles.primary} onPress={onPress}>
         <Text style={styles.primaryText}>{action}</Text>
       </TouchableOpacity>
     </View>
@@ -1682,10 +1666,10 @@ function Nav({
 }) {
   const items: { name: Tab; icon: string }[] = [
     { name: "Discover", icon: "⌂" },
-    { name: "Groups", icon: "◎" },
+    { name: "Communities", icon: "♟" },
     { name: "Create", icon: "＋" },
-    { name: "Plans", icon: "◷" },
-    { name: "Profile", icon: "○" },
+    { name: "My Plans", icon: "▣" },
+    { name: "Profile", icon: "●" },
   ];
   return (
     <View style={styles.nav}>
@@ -1699,7 +1683,7 @@ function Nav({
             {i.icon}
           </Text>
           <Text style={[styles.navText, active === i.name && styles.navActive]}>
-            {i.name}
+            {i.name === "Communities" ? "Community" : i.name}
           </Text>
         </TouchableOpacity>
       ))}
@@ -1814,6 +1798,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   host: { fontSize: 13, fontWeight: "600", color: "#68716D" },
+  spotsText: { fontSize: 11, fontWeight: "700", color: "#247064", marginTop: 3 },
   join: {
     backgroundColor: "#E76F51",
     paddingHorizontal: 15,
@@ -1823,13 +1808,10 @@ const styles = StyleSheet.create({
   joined: { backgroundColor: "#82908B" },
   joinText: { color: "white", fontWeight: "800" },
   nav: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    bottom: 10,
-    height: 70,
+    height: 74,
     backgroundColor: "#17211F",
-    borderRadius: 24,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
