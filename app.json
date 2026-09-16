@@ -3,16 +3,16 @@
     "name": "Nook",
     "slug": "nook",
     "scheme": "nook",
-    "version": "0.6.0",
-    "icon": "./assets/icon-v3.png",
+    "version": "0.7.0",
+    "icon": "./assets/icon-v4.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.immrtldragon.nook",
-      "versionCode": 6,
+      "versionCode": 7,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon-v3.png",
-        "backgroundColor": "#F4F1E8"
+        "foregroundImage": "./assets/icon-v4.png",
+        "backgroundColor": "#063A52"
       },
       "permissions": ["CAMERA"]
     },
