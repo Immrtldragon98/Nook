@@ -3,6 +3,7 @@ import {
   Alert,
   BackHandler,
   Image,
+  Linking,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -13,7 +14,8 @@ import {
   View,
 } from "react-native";
 import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { Camera, CameraView, useCameraPermissions } from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
 import * as Crypto from "expo-crypto";
 import {
   addPendingConnection,
@@ -71,6 +73,9 @@ import {
   requestCloudConnection,
   hasCloudConnection,
   getCloudAccountSummary,
+  getPrivateAvatarUrl,
+  updateCloudProfileDetails,
+  uploadCloudAvatar,
   submitCloudReport,
   submitCloudSafetyRating,
   watchCloudGroups,
@@ -103,6 +108,8 @@ const categories = [
   "Sports",
   "Trips",
   "Food",
+  "Dine out",
+  "Events",
   "Shopping",
 ];
 const bengaluruAreas = ["Indiranagar", "Koramangala", "HSR Layout", "Whitefield", "Jayanagar", "Malleshwaram", "Church Street", "Electronic City"];
@@ -143,6 +150,32 @@ const hangouts: Hangout[] = [
     language: "English · Tamil",
     audience: "Open group",
     safety: 4.7,
+  },
+  {
+    id: 5,
+    emoji: "🍽️",
+    category: "Dine out",
+    title: "Try a new restaurant together",
+    area: "Koramangala",
+    time: "Fri · 8:00 PM",
+    host: "Nook member",
+    spots: 3,
+    language: "English · Kannada",
+    audience: "Open table",
+    safety: 0,
+  },
+  {
+    id: 6,
+    emoji: "🎟️",
+    category: "Events",
+    title: "Live comedy night meetup",
+    area: "Church Street",
+    time: "Sat · 7:30 PM",
+    host: "Nook member",
+    spots: 4,
+    language: "English",
+    audience: "Public event",
+    safety: 0,
   },
   {
     id: 2,
@@ -459,7 +492,7 @@ function Discover({ profile, visible, category, setCategory, joined, setJoined, 
 function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
   const db = useSQLiteContext();
   const [profile, setProfile] = useState<LocalProfile | null>(null);
-  const [kind, setKind] = useState<"local" | "trip">("local");
+  const [kind, setKind] = useState<"local" | "dine" | "event" | "trip">("local");
   const [title, setTitle] = useState("");
   const [area, setArea] = useState("");
   const [day, setDay] = useState<Date | null>(null);
@@ -488,7 +521,7 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
       if (!profile) throw new Error("Profile unavailable");
       await createCloudPlan({
         title,
-        category: kind === "trip" ? "Trips" : "New in city",
+        category: kind === "trip" ? "Trips" : kind === "dine" ? "Dine out" : kind === "event" ? "Events" : "New in city",
         city: profile.city,
         area,
         starts_at: startsAt,
@@ -525,6 +558,22 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
+          onPress={() => setKind("dine")}
+          style={[styles.kindCard, kind === "dine" && styles.kindActive]}
+        >
+          <Text style={styles.kindEmoji}>🍽️</Text>
+          <Text style={styles.kindTitle}>Dine out</Text>
+          <Text style={styles.kindCopy}>Pick a restaurant and fill a table.</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setKind("event")}
+          style={[styles.kindCard, kind === "event" && styles.kindActive]}
+        >
+          <Text style={styles.kindEmoji}>🎟️</Text>
+          <Text style={styles.kindTitle}>Go to an event</Text>
+          <Text style={styles.kindCopy}>Concerts, comedy, workshops and games.</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => setKind("trip")}
           style={[styles.kindCard, kind === "trip" && styles.kindActive]}
         >
@@ -535,6 +584,18 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
           </Text>
         </TouchableOpacity>
       </View>
+      {kind === "dine" && <View style={styles.partnerCard}>
+        <View style={{flex:1}}><Text style={styles.partnerTitle}>Need a restaurant?</Text><Text style={styles.meta}>Explore first, then return and publish the plan.</Text></View>
+        <TouchableOpacity onPress={()=>Linking.openURL("https://www.swiggy.com/restaurants")} style={styles.partnerButton}><Text style={styles.partnerButtonText}>Open Swiggy</Text></TouchableOpacity>
+      </View>}
+      {kind === "event" && <View style={styles.partnerCard}>
+        <View style={{flex:1}}><Text style={styles.partnerTitle}>Find a public event</Text><Text style={styles.meta}>Choose the event before inviting the group.</Text></View>
+        <TouchableOpacity onPress={()=>Linking.openURL("https://in.bookmyshow.com/explore/events")} style={styles.partnerButton}><Text style={styles.partnerButtonText}>Find events</Text></TouchableOpacity>
+      </View>}
+      {kind === "trip" && <View style={styles.partnerCard}>
+        <View style={{flex:1}}><Text style={styles.partnerTitle}>Compare the trip cost</Text><Text style={styles.meta}>Check transport and stay options before publishing.</Text></View>
+        <TouchableOpacity onPress={()=>Linking.openURL("https://www.makemytrip.com/")} style={styles.partnerButton}><Text style={styles.partnerButtonText}>MakeMyTrip</Text></TouchableOpacity>
+      </View>}
       {kind === "trip" && (
         <>
           <View style={styles.tripHero}>
@@ -559,13 +620,17 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
       </Text>
       <Field
         label={
-          kind === "trip" ? "Destination and purpose" : "Activity and purpose"
+          kind === "trip" ? "Destination and purpose" : kind === "dine" ? "Restaurant and meal" : kind === "event" ? "Event name" : "Activity and purpose"
         }
         value={title}
         onChangeText={setTitle}
         placeholder={
           kind === "trip"
             ? "Nandi Hills sunrise day trip"
+            : kind === "dine"
+              ? "Dinner at a new Korean restaurant"
+              : kind === "event"
+                ? "Saturday comedy night"
             : "Badminton after work"
         }
       />
@@ -1496,12 +1561,49 @@ function Profile({
   profile: LocalProfile;
   onEdit: () => void;
 }) {
+  const db = useSQLiteContext();
   const initial = profile.name.slice(0, 1).toUpperCase();
   const [mode, setMode] = useState<"profile" | "show" | "scan">("profile");
   const [nonce, setNonce] = useState(Crypto.randomUUID());
   const [cloudQr, setCloudQr] = useState<{token:string;ownerId:string;expiresAt:string}|null>(null);
-  const [account, setAccount] = useState<{username:string;email:string;emailVerified:boolean;gender:string;age:number|null;faceVerified:boolean;attendedPlans:number}|null>(null);
-  useEffect(() => { getCloudAccountSummary().then(setAccount).catch(() => setAccount(null)); }, []);
+  const [account, setAccount] = useState<{username:string;email:string;emailVerified:boolean;gender:string;age:number|null;faceVerified:boolean;attendedPlans:number;bio:string;avatarPath:string}|null>(null);
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [bio, setBio] = useState(profile.bio || "");
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    getCloudAccountSummary().then(async (summary) => {
+      setAccount(summary);
+      setBio(summary.bio || profile.bio || "");
+      if (summary.avatarPath) setAvatarUrl(await getPrivateAvatarUrl(summary.avatarPath));
+    }).catch(() => setAccount(null));
+  }, []);
+  async function chooseAvatar() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 0.75,
+    });
+    if (result.canceled) return;
+    setSaving(true);
+    try {
+      const asset = result.assets[0];
+      const path = await uploadCloudAvatar(asset.uri, asset.mimeType || "image/jpeg");
+      setAvatarUrl(await getPrivateAvatarUrl(path));
+      setAccount((current) => current ? {...current, avatarPath:path} : current);
+    } catch (error:any) {
+      Alert.alert("Photo not saved", error?.message || "Please try again.");
+    } finally { setSaving(false); }
+  }
+  async function saveProfileDetails() {
+    setSaving(true);
+    try {
+      const clean = await updateCloudProfileDetails(bio);
+      await saveProfile(db, {...profile, bio:clean});
+      setBio(clean);
+      setEditing(false);
+    } catch (error:any) {
+      Alert.alert("Profile not saved", error?.message || "Please try again.");
+    } finally { setSaving(false); }
+  }
   useEffect(() => { if (mode === "show") createConnectionQrToken().then(setCloudQr).catch(() => {
     Alert.alert("Could not create QR", "Connect to the internet and try again."); setMode("profile");
   }); }, [mode, nonce]);
@@ -1550,16 +1652,19 @@ function Profile({
     <ScrollView contentContainerStyle={[styles.page, { paddingTop: 8, paddingBottom: 118 }]} showsVerticalScrollIndicator={false}>
       <View style={styles.profileCard}>
         <View style={styles.profileGlow}>
-          <View style={styles.bigAvatar}>
-            <Text style={styles.bigAvatarText}>{initial}</Text>
-          </View>
+          <TouchableOpacity onPress={chooseAvatar} disabled={saving} style={styles.avatarEditWrap}>
+            <View style={styles.bigAvatar}>
+              {avatarUrl ? <Image source={{uri:avatarUrl}} style={styles.avatarImage} /> : <Text style={styles.bigAvatarText}>{initial}</Text>}
+            </View>
+            <Text style={styles.avatarEditBadge}>{saving ? "…" : "＋"}</Text>
+          </TouchableOpacity>
           <View style={styles.verified}>
             <Text style={styles.verifiedText}>{account?.emailVerified ? "✓ Email verified" : "Local profile"}</Text>
           </View>
         </View>
         <Text style={styles.profileName}>{profile.name}</Text>
         <Text style={styles.profileBio}>
-          {profile.bio || "Ready for a real plan, not endless chatting"}
+          {bio || "Ready for a real plan, not endless chatting"}
         </Text>
         <Text style={styles.profileLocation}>
           📍 {profile.zone}, {profile.city} · {profile.languages}
@@ -1595,6 +1700,14 @@ function Profile({
         <View style={styles.profileStat}><Text style={styles.profileStatValue}>{profile.interests.split(",").filter(Boolean).length}</Text><Text style={styles.profileStatLabel}>Interests</Text></View>
         <View style={styles.profileStat}><Text style={styles.profileStatValue}>{account?.age ?? "18+"}</Text><Text style={styles.profileStatLabel}>Age</Text></View>
       </View>
+      {editing ? <View style={styles.profileEditor}>
+        <Text style={styles.fieldLabel}>Bio</Text>
+        <TextInput value={bio} onChangeText={(value)=>setBio(value.slice(0,160))} multiline maxLength={160}
+          placeholder="What would you enjoy doing with new friends?" style={styles.bioInput} />
+        <Text style={styles.bioCount}>{bio.length}/160</Text>
+        <TouchableOpacity disabled={saving} onPress={saveProfileDetails} style={styles.primaryWide}><Text style={styles.primaryText}>{saving ? "Saving…" : "Save profile"}</Text></TouchableOpacity>
+        <TouchableOpacity onPress={()=>setEditing(false)} style={styles.signOutButton}><Text style={styles.editText}>Cancel</Text></TouchableOpacity>
+      </View> : null}
       <Text style={styles.sectionTitle}>My interests</Text>
       <View style={styles.wrap}>
         {profile.interests.split(",").map((x) => (
@@ -1616,7 +1729,7 @@ function Profile({
         <Text style={styles.accountValue}>{account?.email || "Loading account…"}</Text>
         <Text style={styles.accountHint}>Gender: {account?.gender?.replaceAll("_", " ") || "not shared"} · Contact details stay hidden until you choose to share.</Text>
       </View>
-      <TouchableOpacity onPress={onEdit} style={styles.editButton}><Text style={styles.editText}>Edit profile</Text></TouchableOpacity>
+      <TouchableOpacity onPress={()=>setEditing(true)} style={styles.editButton}><Text style={styles.editText}>Edit photo & bio</Text></TouchableOpacity>
       <TouchableOpacity onPress={() => Alert.alert("Sign out?", "Your local profile stays on this phone.", [{text:"Cancel",style:"cancel"},{text:"Sign out",style:"destructive",onPress:()=>getCloudAccountSummary(true)}])} style={styles.signOutButton}>
         <Text style={styles.signOutText}>Sign out</Text>
       </TouchableOpacity>
@@ -1638,6 +1751,20 @@ function QRScanner({
   const db = useSQLiteContext();
   const [permission, requestPermission] = useCameraPermissions();
   const [locked, setLocked] = useState(false);
+  async function scanFromGallery() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"], allowsEditing: false, quality: 1,
+    });
+    if (result.canceled) return;
+    setLocked(false);
+    try {
+      const codes = await Camera.scanFromURLAsync(result.assets[0].uri, ["qr"]);
+      if (!codes.length) throw new Error("empty");
+      await scanned({data:codes[0].data});
+    } catch {
+      Alert.alert("No QR found", "Choose a clear screenshot where the Nook QR fills most of the image.");
+    }
+  }
   async function scanned({ data }: { data: string }) {
     if (locked) return;
     setLocked(true);
@@ -1702,6 +1829,9 @@ function QRScanner({
           >
             <Text style={styles.primaryText}>Allow camera</Text>
           </TouchableOpacity>
+          <TouchableOpacity onPress={scanFromGallery} style={styles.galleryButton}>
+            <Text style={styles.galleryButtonText}>Choose QR from gallery</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={onClose} style={styles.editButton}>
             <Text style={styles.editText}>Cancel</Text>
           </TouchableOpacity>
@@ -1718,6 +1848,9 @@ function QRScanner({
       <View style={styles.scanOverlay}>
         <Text style={styles.scanTitle}>Scan Nook QR</Text>
         <View style={styles.scanFrame} />
+        <TouchableOpacity onPress={scanFromGallery} style={styles.galleryButton}>
+          <Text style={styles.galleryButtonText}>▧ Scan saved QR</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={onClose} style={styles.scanClose}>
           <Text style={styles.primaryText}>Close scanner</Text>
         </TouchableOpacity>
@@ -1987,6 +2120,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 13,
   },
+  avatarEditWrap: { position: "relative" },
+  avatarImage: { width: 76, height: 76, borderRadius: 38 },
+  avatarEditBadge: { position: "absolute", right: -3, bottom: 8, width: 25, height: 25, borderRadius: 13, backgroundColor: "#F0AF49", color: "#27312E", textAlign: "center", textAlignVertical: "center", fontWeight: "900" },
   bigAvatarText: { fontSize: 28, fontWeight: "800" },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
   safety: {
@@ -2033,6 +2169,9 @@ const styles = StyleSheet.create({
   verifiedText: { color: "#176448", fontWeight: "800", fontSize: 12 },
   profileName: { fontSize: 28, fontWeight: "900", color: "white" },
   profileBio: { fontSize: 15, color: "#E8DFFF", marginTop: 5 },
+  profileEditor: { backgroundColor: "#FFF", borderRadius: 20, padding: 16, marginTop: 14, borderWidth: 1, borderColor: "#E7E5DE" },
+  bioInput: { minHeight: 100, borderRadius: 14, borderWidth: 1, borderColor: "#DDDAD0", padding: 13, color: "#17211F", textAlignVertical: "top", marginTop: 7 },
+  bioCount: { textAlign: "right", color: "#8A918E", fontSize: 11, marginTop: 5 },
   profileLocation: { fontSize: 13, color: "#D4C9F1", marginTop: 10 },
   profileUsername: { fontSize: 13, color: "#F8C96F", fontWeight: "900", marginTop: 7 },
   profileStats: { flexDirection: "row", backgroundColor: "#FFFFFF", borderRadius: 20, marginTop: 14, paddingVertical: 15, borderWidth: 1, borderColor: "#ECEAE3" },
@@ -2087,10 +2226,10 @@ const styles = StyleSheet.create({
   },
   tripRulesText: { fontSize: 11, fontWeight: "700", color: "#4B4F83" },
   tripJoin: { backgroundColor: "#4E56A6" },
-  kindRow: { flexDirection: "row", gap: 12 },
+  kindRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   kindCard: {
-    flex: 1,
-    minHeight: 150,
+    width: "47.8%",
+    minHeight: 142,
     backgroundColor: "#FFFFFF",
     borderWidth: 2,
     borderColor: "#ECEAE3",
@@ -2101,6 +2240,10 @@ const styles = StyleSheet.create({
   kindEmoji: { fontSize: 27, marginBottom: 13 },
   kindTitle: { fontSize: 16, fontWeight: "900", color: "#17211F" },
   kindCopy: { fontSize: 12, lineHeight: 17, color: "#68716D", marginTop: 5 },
+  partnerCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFF", borderRadius: 18, borderWidth: 1, borderColor: "#E7E5DE", padding: 14, marginTop: 14 },
+  partnerTitle: { fontSize: 14, fontWeight: "900", color: "#17211F", marginBottom: 3 },
+  partnerButton: { backgroundColor: "#7EA6FA", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  partnerButtonText: { color: "#FFF", fontWeight: "900", fontSize: 11 },
   formRow: {
     height: 54,
     flexDirection: "row",
@@ -2289,6 +2432,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 16,
   },
+  galleryButton: { backgroundColor: "#FFF", borderRadius: 15, paddingHorizontal: 18, paddingVertical: 13, borderWidth: 1, borderColor: "#D8D5CB" },
+  galleryButtonText: { color: "#315F94", fontWeight: "900" },
   smallAdd: {
     backgroundColor: "#247064",
     paddingHorizontal: 13,

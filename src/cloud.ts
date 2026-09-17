@@ -290,7 +290,7 @@ export async function getCloudAccountSummary(signOut = false) {
   if (error) throw error;
   if (!user) throw new Error("Sign in required");
   const [profileResult, trustResult] = await Promise.all([
-    supabase.from("profiles").select("username").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("username,bio,avatar_url").eq("id", user.id).maybeSingle(),
     supabase.from("trust_assertions").select("face_verified,attended_plans").eq("user_id", user.id).maybeSingle(),
   ]);
   if (profileResult.error) throw profileResult.error;
@@ -303,7 +303,41 @@ export async function getCloudAccountSummary(signOut = false) {
     age: Number(user.user_metadata?.declared_age) || null,
     faceVerified: !!trustResult.data?.face_verified,
     attendedPlans: trustResult.data?.attended_plans ?? 0,
+    bio: profileResult.data?.bio ?? "",
+    avatarPath: profileResult.data?.avatar_url ?? "",
   };
+}
+
+export async function updateCloudProfileDetails(bio: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const cleanBio = bio.trim().slice(0, 160);
+  const { error } = await supabase.from("profiles").update({ bio: cleanBio }).eq("id", user.id);
+  if (error) throw error;
+  return cleanBio;
+}
+
+export async function uploadCloudAvatar(uri: string, mimeType = "image/jpeg") {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const ext = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
+  const path = `${user.id}/profile.${ext}`;
+  const bytes = await (await fetch(uri)).arrayBuffer();
+  const { error: uploadError } = await supabase.storage.from("avatars").upload(path, bytes, {
+    contentType: mimeType,
+    upsert: true,
+  });
+  if (uploadError) throw uploadError;
+  const { error: profileError } = await supabase.from("profiles").update({ avatar_url: path }).eq("id", user.id);
+  if (profileError) throw profileError;
+  return path;
+}
+
+export async function getPrivateAvatarUrl(path: string) {
+  if (!path) return "";
+  const { data, error } = await supabase.storage.from("avatars").createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
 }
 export function watchCloudGroups(onChange: () => void) {
   const channel = supabase

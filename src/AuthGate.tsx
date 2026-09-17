@@ -40,7 +40,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 function Auth() {
-  const [mode, setMode] = useState<"in" | "up">("up");
+  const [mode, setMode] = useState<"in" | "up">("in");
   const [identifier, setIdentifier] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -94,7 +94,7 @@ function Auth() {
     <SafeAreaView style={s.safe}>
       <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
       <View style={s.card}>
-        <Text style={s.brand}>Nook</Text>
+        <View style={s.brandRow}><View style={s.brandMark}><Text style={s.brandMarkText}>n</Text></View><Text style={s.brand}>Nook</Text></View>
         <Text style={s.title}>{mode === "up" ? "Create your Nook." : "Welcome back."}</Text>
         <Text style={s.copy}>
           {mode === "up"
@@ -110,15 +110,15 @@ function Auth() {
           </TouchableOpacity>
         </View>
         {mode === "up" ? <>
-          <Text style={s.fieldLabel}>Username</Text>
+          <View style={s.fieldHeading}><Text style={s.fieldIcon}>@</Text><View><Text style={s.fieldLabel}>Username</Text><Text style={s.fieldHelp}>Your public Nook name</Text></View></View>
           <TextInput value={username} onChangeText={setUsername} autoCapitalize="none"
-            placeholder="Username (example: Logan)" style={s.input} />
-          <Text style={s.fieldLabel}>Email</Text>
+            placeholder="Example: Logan" style={s.input} />
+          <View style={s.fieldHeading}><Text style={s.fieldIcon}>✉</Text><View><Text style={s.fieldLabel}>Email address</Text><Text style={s.fieldHelp}>Used for verification and recovery</Text></View></View>
           <TextInput value={email} onChangeText={setEmail} autoCapitalize="none"
-            keyboardType="email-address" placeholder="Email" style={s.input} />
-          <Text style={s.fieldLabel}>Age</Text>
+            keyboardType="email-address" placeholder="name@email.com" style={s.input} />
+          <View style={s.fieldHeading}><Text style={s.fieldIcon}>18+</Text><View><Text style={s.fieldLabel}>Age</Text><Text style={s.fieldHelp}>Nook is currently for adults</Text></View></View>
           <TextInput value={age} onChangeText={setAge} keyboardType="number-pad"
-            placeholder="Age (18+)" style={s.input} />
+            placeholder="Enter your age" style={s.input} />
           <Text style={s.fieldLabel}>Gender</Text>
           <View style={s.genderRow}>
             {[['woman','Woman'],['man','Man'],['non_binary','Non-binary'],['prefer_not_to_say','Skip']].map(([value,label]) => (
@@ -128,9 +128,9 @@ function Auth() {
               </TouchableOpacity>
             ))}
           </View>
-        </> : <><Text style={s.fieldLabel}>Username or email</Text><TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none"
+        </> : <><View style={s.fieldHeading}><Text style={s.fieldIcon}>@</Text><View><Text style={s.fieldLabel}>Username or email</Text><Text style={s.fieldHelp}>Either one works</Text></View></View><TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none"
           placeholder="Logan or name@email.com" style={s.input} /></>}
-        <View style={s.passwordLabelRow}><Text style={s.fieldLabel}>Password</Text><TouchableOpacity onPress={() => setShowPassword(!showPassword)}><Text style={s.showText}>{showPassword ? "Hide" : "Show"}</Text></TouchableOpacity></View>
+        <View style={s.passwordLabelRow}><View style={s.fieldHeading}><Text style={s.fieldIcon}>●</Text><View><Text style={s.fieldLabel}>Password</Text><Text style={s.fieldHelp}>Minimum 8 characters</Text></View></View><TouchableOpacity onPress={() => setShowPassword(!showPassword)}><Text style={s.showText}>{showPassword ? "Hide" : "Show"}</Text></TouchableOpacity></View>
         <TextInput
           value={password}
           onChangeText={setPassword}
@@ -175,6 +175,9 @@ const s = StyleSheet.create({
     color: "#247064",
     letterSpacing: 1,
   },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 9 },
+  brandMark: { width: 34, height: 34, borderRadius: 11, backgroundColor: "#7EA6FA", alignItems: "center", justifyContent: "center" },
+  brandMarkText: { color: "#FFF", fontWeight: "900", fontSize: 23 },
   title: {
     fontSize: 31,
     lineHeight: 37,
@@ -196,7 +199,10 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     marginBottom: 12,
   },
-  fieldLabel: { color: "#4F5955", fontWeight: "800", fontSize: 12, marginBottom: 7 },
+  fieldHeading: { flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 7 },
+  fieldIcon: { width: 27, height: 27, borderRadius: 9, textAlign: "center", textAlignVertical: "center", backgroundColor: "#EEF2FF", color: "#5769B3", fontSize: 10, fontWeight: "900" },
+  fieldLabel: { color: "#27312E", fontWeight: "900", fontSize: 13 },
+  fieldHelp: { color: "#87908C", fontWeight: "600", fontSize: 10, marginTop: 1 },
   passwordLabelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   showText: { color: "#247064", fontWeight: "900", fontSize: 12, marginBottom: 7 },
   genderRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 12 },
