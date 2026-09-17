@@ -49,12 +49,24 @@ function Auth() {
   const [gender, setGender] = useState("prefer_not_to_say");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const passwordRules = {
+    length: password.length >= 10,
+    upper: /[A-Z]/.test(password),
+    lower: /[a-z]/.test(password),
+    number: /\d/.test(password),
+    symbol: /[^A-Za-z0-9]/.test(password),
+  };
+  const strongPassword = Object.values(passwordRules).every(Boolean);
   async function submit(mode: "in" | "up") {
-    if (password.length < 8 || (mode === "in" ? !identifier.trim() : !email.trim()))
+    if (!password || (mode === "in" ? !identifier.trim() : !email.trim()))
       return Alert.alert(
         "Check details",
-        "Use a valid email and a password of at least 8 characters.",
+        "Enter your username or email and password.",
       );
+    if (mode === "up" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+      return Alert.alert("Check email", "Enter a complete email address, such as name@email.com.");
+    if (mode === "up" && !strongPassword)
+      return Alert.alert("Choose a stronger password", "Use 10+ characters with uppercase, lowercase, a number and a symbol.");
     if (mode === "up" && !/^[a-zA-Z][a-zA-Z0-9_]{2,19}$/.test(username))
       return Alert.alert("Check username", "Use 3–20 letters, numbers or underscores; start with a letter.");
     const declaredAge = Number(age);
@@ -130,14 +142,25 @@ function Auth() {
           </View>
         </> : <><View style={s.fieldHeading}><Text style={s.fieldIcon}>@</Text><View><Text style={s.fieldLabel}>Username or email</Text><Text style={s.fieldHelp}>Either one works</Text></View></View><TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none"
           placeholder="Logan or name@email.com" style={s.input} /></>}
-        <View style={s.passwordLabelRow}><View style={s.fieldHeading}><Text style={s.fieldIcon}>●</Text><View><Text style={s.fieldLabel}>Password</Text><Text style={s.fieldHelp}>Minimum 8 characters</Text></View></View><TouchableOpacity onPress={() => setShowPassword(!showPassword)}><Text style={s.showText}>{showPassword ? "Hide" : "Show"}</Text></TouchableOpacity></View>
+        <View style={s.passwordLabelRow}><View style={s.fieldHeading}><Text style={s.fieldIcon}>●</Text><View><Text style={s.fieldLabel}>Password</Text><Text style={s.fieldHelp}>{mode === "up" ? "Create a strong, unique password" : "Your registered Nook password"}</Text></View></View><TouchableOpacity onPress={() => setShowPassword(!showPassword)}><Text style={s.showText}>{showPassword ? "Hide" : "Show"}</Text></TouchableOpacity></View>
         <TextInput
           value={password}
           onChangeText={setPassword}
           secureTextEntry={!showPassword}
-          placeholder="Password (8+ characters)"
+          placeholder={mode === "up" ? "10+ characters" : "Enter your password"}
           style={s.input}
         />
+        {mode === "up" && <View style={s.passwordRules}>
+          {[
+            [passwordRules.length, "10+ characters"],
+            [passwordRules.upper && passwordRules.lower, "Uppercase and lowercase"],
+            [passwordRules.number, "At least one number"],
+            [passwordRules.symbol, "At least one symbol"],
+          ].map(([passed, label]) => <View key={String(label)} style={s.ruleRow}>
+            <Text style={[s.ruleMark, passed && s.rulePassed]}>{passed ? "✓" : "○"}</Text>
+            <Text style={[s.ruleText, passed && s.ruleTextPassed]}>{label}</Text>
+          </View>)}
+        </View>}
         <TouchableOpacity
           disabled={busy}
           onPress={() => submit(mode)}
@@ -205,6 +228,12 @@ const s = StyleSheet.create({
   fieldHelp: { color: "#87908C", fontWeight: "600", fontSize: 10, marginTop: 1 },
   passwordLabelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   showText: { color: "#247064", fontWeight: "900", fontSize: 12, marginBottom: 7 },
+  passwordRules: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 14 },
+  ruleRow: { flexDirection: "row", alignItems: "center", gap: 5, width: "47%" },
+  ruleMark: { color: "#A2A9A6", fontWeight: "900", fontSize: 13 },
+  rulePassed: { color: "#247064" },
+  ruleText: { color: "#7B8581", fontSize: 10, fontWeight: "700" },
+  ruleTextPassed: { color: "#247064" },
   genderRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 12 },
   genderChip: { borderWidth: 1, borderColor: "#DDDAD0", borderRadius: 12, paddingHorizontal: 11, paddingVertical: 9 },
   genderActive: { backgroundColor: "#E3F2EC", borderColor: "#247064" },
