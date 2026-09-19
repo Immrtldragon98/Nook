@@ -318,3 +318,57 @@ end; $$;
 revoke all on function nook_private.create_account_records() from public,anon,authenticated;
 create trigger nook_create_account_records after insert on auth.users
 for each row execute function nook_private.create_account_records();
+
+-- V1.1: private member blocking and moderator-only safety case workflow.
+create table public.user_blocks (
+  blocker_id uuid not null references auth.users(id) on delete cascade,
+  blocked_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id), check (blocker_id <> blocked_id)
+);
+create index user_blocks_blocked_idx on public.user_blocks(blocked_id);
+alter table public.user_blocks enable row level security;
+create policy blocks_read_self on public.user_blocks for select to authenticated using ((select auth.uid())=blocker_id);
+create policy blocks_create_self on public.user_blocks for insert to authenticated with check ((select auth.uid())=blocker_id);
+create policy blocks_delete_self on public.user_blocks for delete to authenticated using ((select auth.uid())=blocker_id);
+grant select,insert,delete on public.user_blocks to authenticated;
+
+create table public.moderation_cases (
+  id uuid primary key default gen_random_uuid(), reporter_id uuid not null references auth.users(id) on delete cascade,
+  target_type text not null check (target_type in ('user','plan','group')),
+  target_user_id uuid references auth.users(id) on delete set null,
+  target_plan_id uuid references public.plans(id) on delete set null,
+  target_group_id uuid references public.groups(id) on delete set null,
+  reason text not null check (char_length(reason) between 10 and 500),
+  details text not null default '' check (char_length(details) <= 1000),
+  status text not null default 'open' check (status in ('open','under_review','resolved','dismissed')),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  resolved_at timestamptz, resolved_by uuid references auth.users(id) on delete set null,
+  check ((target_type='user' and target_user_id is not null and target_plan_id is null and target_group_id is null) or (target_type='plan' and target_plan_id is not null and target_user_id is null and target_group_id is null) or (target_type='group' and target_group_id is not null and target_user_id is null and target_plan_id is null))
+);
+create index moderation_cases_status_created_idx on public.moderation_cases(status,created_at desc);
+create index moderation_cases_target_user_idx on public.moderation_cases(target_user_id);
+create index moderation_cases_target_plan_idx on public.moderation_cases(target_plan_id);
+create index moderation_cases_target_group_idx on public.moderation_cases(target_group_id);
+create index moderation_cases_resolved_by_idx on public.moderation_cases(resolved_by);
+alter table public.moderation_cases enable row level security;
+create policy cases_create_self on public.moderation_cases for insert to authenticated with check ((select auth.uid())=reporter_id and status='open' and resolved_at is null and resolved_by is null);
+create policy cases_read_self_or_moderator on public.moderation_cases for select to authenticated using ((select auth.uid())=reporter_id or exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='moderator'));
+create policy cases_update_moderator on public.moderation_cases for update to authenticated using (exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='moderator')) with check (exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='moderator'));
+grant select,insert,update on public.moderation_cases to authenticated;
+
+create table public.moderation_actions (
+  id uuid primary key default gen_random_uuid(), case_id uuid not null references public.moderation_cases(id) on delete cascade,
+  actor_id uuid references auth.users(id) on delete set null, action text not null check (char_length(action) between 3 and 100),
+  note text not null default '' check (char_length(note) <= 500), created_at timestamptz not null default now()
+);
+create index moderation_actions_case_created_idx on public.moderation_actions(case_id,created_at);
+create index moderation_actions_actor_idx on public.moderation_actions(actor_id);
+alter table public.moderation_actions enable row level security;
+create policy actions_read_moderator on public.moderation_actions for select to authenticated using (exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='moderator'));
+create policy actions_create_moderator on public.moderation_actions for insert to authenticated with check (exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='moderator') and (select auth.uid())=actor_id);
+grant select,insert on public.moderation_actions to authenticated;
+
+create policy plan_requests_not_blocked on public.plan_requests as restrictive for insert to authenticated with check (not exists (select 1 from public.plans p join public.user_blocks b on b.blocked_id=p.creator_id where p.id=plan_id and b.blocker_id=(select auth.uid())));
+create policy memberships_not_blocked on public.memberships as restrictive for insert to authenticated with check (not exists (select 1 from public.groups g join public.user_blocks b on b.blocked_id=g.host_id where g.id=group_id and b.blocker_id=(select auth.uid())));
+create policy connections_not_blocked on public.connections as restrictive for insert to authenticated with check (not exists (select 1 from public.user_blocks b where b.blocker_id=(select auth.uid()) and b.blocked_id=addressee_id));

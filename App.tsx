@@ -78,6 +78,11 @@ import {
   uploadCloudAvatar,
   submitCloudReport,
   submitCloudSafetyRating,
+  blockCloudUser,
+  submitModerationCase,
+  isCloudModerator,
+  listModerationCases,
+  updateModerationCase,
   watchCloudGroups,
   watchCloudPlans,
   type CloudGroup,
@@ -959,9 +964,9 @@ function CloudGroups({ profile }: { profile: LocalProfile }) {
               <TouchableOpacity
                 onPress={async () => {
                   try {
-                    await submitCloudReport(
-                      g.id,
-                      "Safety concern submitted from the Nook group screen.",
+                    await submitModerationCase(
+                      { type: "group", id: g.id },
+                      "Safety concern submitted from the Nook community screen.",
                     );
                     Alert.alert(
                       "Report received",
@@ -1440,6 +1445,14 @@ function ActivityDetail({ plan, onClose, onRequested }: { plan: Hangout; onClose
       else Alert.alert("Could not request", e.message ?? "Please try again.");
     } finally { setBusy(false); }
   }
+  function reportPlan(reason: string) {
+    if (typeof plan.id !== "string") return Alert.alert("Demo activity", "Reports are available for activities published by Nook members.");
+    submitModerationCase({type:"plan",id:plan.id}, reason).then(() => Alert.alert("Report received", "A moderator will review this privately.")).catch(() => Alert.alert("Could not send report", "Please try again."));
+  }
+  function blockHost() {
+    if (!plan.creatorId) return Alert.alert("Unavailable", "This activity does not have a member host to block.");
+    Alert.alert("Block this host?", "You will not be able to send new requests or QR connections to them.", [{text:"Cancel",style:"cancel"},{text:"Block",style:"destructive",onPress:()=>blockCloudUser(plan.creatorId!).then(()=>Alert.alert("Host blocked", "Nook will prevent new interactions with them.")).catch(()=>Alert.alert("Could not block", "Please try again."))}]);
+  }
   return <ScrollView contentContainerStyle={styles.detailPage} showsVerticalScrollIndicator={false}>
     <TouchableOpacity onPress={onClose} style={styles.detailBack}><Text style={styles.detailBackText}>‹  Discover</Text></TouchableOpacity>
     <View style={styles.detailHero}><Text style={styles.detailEmoji}>{plan.emoji}</Text><Text style={styles.detailCategory}>{plan.category.toUpperCase()}</Text><Text style={styles.detailTitle}>{plan.title}</Text><Text style={styles.detailTime}>{plan.time}</Text></View>
@@ -1448,6 +1461,14 @@ function ActivityDetail({ plan, onClose, onRequested }: { plan: Hangout; onClose
     <View style={styles.detailCard}><Text style={styles.detailLabel}>SAFETY BEFORE CHAT</Text><View style={styles.safetyLine}><Text style={styles.safetyStrong}>{plan.safety ? `★ ${plan.safety}` : "New activity"}</Text><Text style={styles.detailNote}>{plan.audience}</Text></View><Text style={styles.detailNote}>Your phone number and exact location stay private. Meet first in a public place.</Text></View>
     {plan.trustedOnly && <View style={[styles.detailCard, styles.lockedCard]}><Text style={styles.detailValue}>🔒 Trusted members only</Text><Text style={styles.detailNote}>{eligible ? "You meet the current trust requirements." : `Face approval and 3 attended plans required. Current: ${trust?.attendedPlans ?? 0}/3.`}</Text></View>}
     <TouchableOpacity disabled={busy} onPress={request} style={[styles.primaryWide, !eligible && styles.disabledAction]}><Text style={styles.primaryText}>{busy ? "Sending request…" : eligible ? "Request to join" : "Complete trust checks first"}</Text></TouchableOpacity>
+    <View style={styles.detailSafetyActions}>
+      <TouchableOpacity onPress={() => Alert.alert("Report activity", "Choose the closest reason.", [
+        {text:"Unsafe or inappropriate",onPress:()=>reportPlan("Unsafe or inappropriate activity")},
+        {text:"Misleading details",onPress:()=>reportPlan("Misleading activity details")},
+        {text:"Cancel",style:"cancel"},
+      ])}><Text style={styles.safetyLink}>Report activity</Text></TouchableOpacity>
+      {plan.creatorId && <TouchableOpacity onPress={blockHost}><Text style={styles.safetyLink}>Block host</Text></TouchableOpacity>}
+    </View>
     <Text style={styles.detailFootnote}>The host reviews your request. Contact details are never shared automatically.</Text>
   </ScrollView>;
 }
@@ -1583,7 +1604,7 @@ function Profile({
 }) {
   const db = useSQLiteContext();
   const initial = profile.name.slice(0, 1).toUpperCase();
-  const [mode, setMode] = useState<"profile" | "show" | "scan">("profile");
+  const [mode, setMode] = useState<"profile" | "show" | "scan" | "moderation">("profile");
   const [nonce, setNonce] = useState(Crypto.randomUUID());
   const [cloudQr, setCloudQr] = useState<{token:string;ownerId:string;expiresAt:string}|null>(null);
   const [account, setAccount] = useState<{username:string;email:string;emailVerified:boolean;gender:string;age:number|null;faceVerified:boolean;attendedPlans:number;bio:string;avatarPath:string}|null>(null);
@@ -1593,12 +1614,14 @@ function Profile({
   const [changingPassword, setChangingPassword] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [saving, setSaving] = useState(false);
+  const [moderator, setModerator] = useState(false);
   useEffect(() => {
     getCloudAccountSummary().then(async (summary) => {
       setAccount(summary);
       setBio(summary.bio || profile.bio || "");
       if (summary.avatarPath) setAvatarUrl(await getPrivateAvatarUrl(summary.avatarPath));
     }).catch(() => setAccount(null));
+    isCloudModerator().then(setModerator).catch(() => setModerator(false));
   }, []);
   async function chooseAvatar() {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1679,6 +1702,7 @@ function Profile({
         onClose={() => setMode("profile")}
       />
     );
+  if (mode === "moderation") return <ModeratorDesk onClose={() => setMode("profile")} />;
   return (
     <ScrollView contentContainerStyle={[styles.page, { paddingTop: 8, paddingBottom: 118 }]} showsVerticalScrollIndicator={false}>
       <View style={styles.profileCard}>
@@ -1767,6 +1791,7 @@ function Profile({
         <TouchableOpacity onPress={()=>{setChangingPassword(false);setNewPassword("");}} style={styles.signOutButton}><Text style={styles.editText}>Cancel</Text></TouchableOpacity>
       </View> : <TouchableOpacity onPress={()=>setChangingPassword(true)} style={styles.editButton}><Text style={styles.editText}>Change password</Text></TouchableOpacity>}
       <TouchableOpacity onPress={()=>setEditing(true)} style={styles.editButton}><Text style={styles.editText}>Edit photo & bio</Text></TouchableOpacity>
+      {moderator && <TouchableOpacity onPress={() => setMode("moderation")} style={styles.moderatorButton}><Text style={styles.moderatorButtonText}>Open moderator case queue</Text></TouchableOpacity>}
       <TouchableOpacity onPress={() => Alert.alert("Delete Nook account?", "This permanently removes your profile, plans, QR connections and private photo. It cannot be undone.", [{text:"Cancel",style:"cancel"},{text:"Delete account",style:"destructive",onPress:()=>deleteMyCloudAccount().catch(()=>Alert.alert("Could not delete account", "Please check your connection and try again."))}])} style={styles.deleteButton}>
         <Text style={styles.deleteText}>Delete account and data</Text>
       </TouchableOpacity>
@@ -1775,6 +1800,28 @@ function Profile({
       </TouchableOpacity>
     </ScrollView>
   );
+}
+
+function ModeratorDesk({ onClose }: { onClose: () => void }) {
+  const [cases, setCases] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  async function refresh() { setLoading(true); try { setCases(await listModerationCases()); } catch { Alert.alert("Moderator access required", "This account is not allowed to view cases."); } finally { setLoading(false); } }
+  useEffect(() => { refresh(); }, []);
+  async function act(id: string, status: "under_review" | "resolved" | "dismissed") { try { await updateModerationCase(id, status); await refresh(); } catch { Alert.alert("Could not update case", "Please try again."); } }
+  return <ScrollView contentContainerStyle={styles.page}>
+    <TouchableOpacity onPress={onClose} style={styles.detailBack}><Text style={styles.detailBackText}>‹ Profile</Text></TouchableOpacity>
+    <Text style={styles.h1}>Safety cases</Text>
+    <Text style={styles.intro}>Private reports. Review evidence carefully; a report alone is not proof.</Text>
+    {loading ? <Text style={styles.meta}>Loading cases…</Text> : cases.length === 0 ? <Empty emoji="✓" title="No open cases" body="New member reports will appear here." action="Refresh" onPress={refresh} /> : cases.map((item) => <View key={item.id} style={styles.caseCard}>
+      <Text style={styles.caseType}>{item.target_type.toUpperCase()} · {item.status.replaceAll("_", " ")}</Text>
+      <Text style={styles.caseReason}>{item.reason}</Text>
+      {item.details ? <Text style={styles.meta}>{item.details}</Text> : null}
+      <Text style={styles.caseDate}>{new Date(item.created_at).toLocaleString()}</Text>
+      {item.status === "open" && <TouchableOpacity onPress={() => act(item.id, "under_review")} style={styles.miniButton}><Text style={styles.editText}>Start review</Text></TouchableOpacity>}
+      {(item.status === "open" || item.status === "under_review") && <View style={styles.memberActions}><TouchableOpacity onPress={() => act(item.id, "resolved")} style={styles.approveButton}><Text style={styles.primaryText}>Resolve</Text></TouchableOpacity><TouchableOpacity onPress={() => act(item.id, "dismissed")} style={styles.miniButton}><Text style={styles.editText}>Dismiss</Text></TouchableOpacity></View>}
+    </View>)}
+    <View style={{height:90}} />
+  </ScrollView>;
 }
 
 function TrustRow({icon,title,value,done,last=false}:{icon:string;title:string;value:string;done:boolean;last?:boolean}) {
@@ -2423,6 +2470,12 @@ const styles = StyleSheet.create({
   signOutText: { color: "#A04437", fontWeight: "800" },
   deleteButton: { alignItems: "center", borderWidth: 1, borderColor: "#F2D2CC", backgroundColor: "#FFF7F5", borderRadius: 14, paddingVertical: 13, marginTop: 12 },
   deleteText: { color: "#B24F43", fontWeight: "900", fontSize: 13 },
+  moderatorButton: { alignItems: "center", borderWidth: 1, borderColor: "#D8D0F0", backgroundColor: "#F6F3FF", borderRadius: 14, paddingVertical: 13, marginTop: 12 },
+  moderatorButtonText: { color: "#503A82", fontWeight: "900", fontSize: 13 },
+  caseCard: { backgroundColor: "#FFF", borderRadius: 18, borderWidth: 1, borderColor: "#E7E5DE", padding: 15, marginTop: 12 },
+  caseType: { color: "#65558F", fontWeight: "900", fontSize: 10, letterSpacing: 0.6 },
+  caseReason: { color: "#17211F", fontWeight: "900", fontSize: 14, marginTop: 6 },
+  caseDate: { color: "#8A918E", fontSize: 10, marginTop: 8 },
   qrActions: { flexDirection: "row", gap: 10, marginTop: 14 },
   qrAction: {
     flex: 1,
@@ -2550,6 +2603,8 @@ const styles = StyleSheet.create({
     borderColor: "#ECEAE3",
   },
   memberActions: { flexDirection: "row", gap: 8, marginTop: 12 },
+  detailSafetyActions: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4, marginTop: 14 },
+  safetyLink: { color: "#A04437", fontWeight: "800", fontSize: 12 },
   approveButton: {
     backgroundColor: "#247064",
     paddingHorizontal: 12,

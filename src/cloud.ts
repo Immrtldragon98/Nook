@@ -36,6 +36,10 @@ export type CloudNotification = {
   read_at: string | null;
   created_at: string;
 };
+export type ModerationCase = {
+  id: string; target_type: "user" | "plan" | "group"; reason: string; details: string;
+  status: "open" | "under_review" | "resolved" | "dismissed"; created_at: string;
+};
 
 export async function listCloudPlans(city: string, limit = 50) {
   const { data, error } = await supabase.from("plans").select("*")
@@ -346,6 +350,52 @@ export async function deleteMyCloudAccount() {
   if (error) throw error;
   const { error: signOutError } = await supabase.auth.signOut();
   if (signOutError) throw signOutError;
+}
+
+export async function blockCloudUser(blockedId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  if (user.id === blockedId) throw new Error("You cannot block yourself");
+  const { error } = await supabase.from("user_blocks").insert({ blocker_id: user.id, blocked_id: blockedId });
+  if (error && error.code !== "23505") throw error;
+}
+
+export async function submitModerationCase(target: { type: "user" | "plan" | "group"; id: string }, reason: string, details = "") {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const body: Record<string, string> = { reporter_id: user.id, target_type: target.type, reason, details };
+  if (target.type === "user") body.target_user_id = target.id;
+  if (target.type === "plan") body.target_plan_id = target.id;
+  if (target.type === "group") body.target_group_id = target.id;
+  const { error } = await supabase.from("moderation_cases").insert(body);
+  if (error) throw error;
+}
+
+export async function isCloudModerator() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { data, error } = await supabase.from("user_roles").select("role").eq("user_id", user.id).maybeSingle();
+  if (error) throw error;
+  return data?.role === "moderator";
+}
+
+export async function listModerationCases() {
+  const { data, error } = await supabase.from("moderation_cases")
+    .select("id,target_type,reason,details,status,created_at").order("created_at", { ascending: false }).limit(100);
+  if (error) throw error;
+  return (data ?? []) as ModerationCase[];
+}
+
+export async function updateModerationCase(id: string, status: "under_review" | "resolved" | "dismissed", note = "") {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const updates = status === "resolved" || status === "dismissed"
+    ? { status, updated_at: new Date().toISOString(), resolved_at: new Date().toISOString(), resolved_by: user.id }
+    : { status, updated_at: new Date().toISOString() };
+  const { error } = await supabase.from("moderation_cases").update(updates).eq("id", id);
+  if (error) throw error;
+  const { error: actionError } = await supabase.from("moderation_actions").insert({ case_id: id, actor_id: user.id, action: status, note });
+  if (actionError) throw actionError;
 }
 export function watchCloudGroups(onChange: () => void) {
   const channel = supabase
