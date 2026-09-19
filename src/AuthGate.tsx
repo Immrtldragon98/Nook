@@ -40,7 +40,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 function Auth() {
-  const [mode, setMode] = useState<"in" | "up">("in");
+  const [mode, setMode] = useState<"in" | "up" | "recover">("in");
   const [identifier, setIdentifier] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -57,6 +57,17 @@ function Auth() {
     symbol: /[^A-Za-z0-9]/.test(password),
   };
   const strongPassword = Object.values(passwordRules).every(Boolean);
+  async function sendRecovery() {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+      return Alert.alert("Check email", "Enter the email address for your Nook account.");
+    setBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: "nook://auth/callback",
+    });
+    setBusy(false);
+    if (error) Alert.alert("Could not send reset email", "Please wait a minute and try again.");
+    else Alert.alert("Check your email", "Open the reset link on this phone, then choose a new password in Profile → Account & privacy.");
+  }
   async function submit(mode: "in" | "up") {
     if (!password || (mode === "in" ? !identifier.trim() : !email.trim()))
       return Alert.alert(
@@ -107,21 +118,25 @@ function Auth() {
       <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
       <View style={s.card}>
         <View style={s.brandRow}><View style={s.brandMark}><Text style={s.brandMarkText}>n</Text></View><Text style={s.brand}>Nook</Text></View>
-        <Text style={s.title}>{mode === "up" ? "Create your Nook." : "Welcome back."}</Text>
+        <Text style={s.title}>{mode === "up" ? "Create your Nook." : mode === "recover" ? "Reset your password." : "Welcome back."}</Text>
         <Text style={s.copy}>
           {mode === "up"
             ? "Find friends through real activities—not swiping. Your phone number stays private."
+            : mode === "recover" ? "We’ll send a private reset link to your registered email."
             : "Sign in to see your groups, plans and connections on this phone."}
         </Text>
-        <View style={s.tabs}>
+        {mode !== "recover" && <View style={s.tabs}>
           <TouchableOpacity onPress={() => setMode("up")} style={[s.tab, mode === "up" && s.tabActive]}>
             <Text style={[s.tabText, mode === "up" && s.tabTextActive]}>Create account</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setMode("in")} style={[s.tab, mode === "in" && s.tabActive]}>
             <Text style={[s.tabText, mode === "in" && s.tabTextActive]}>Sign in</Text>
           </TouchableOpacity>
-        </View>
-        {mode === "up" ? <>
+        </View>}
+        {mode === "recover" ? <>
+          <View style={s.fieldHeading}><Text style={s.fieldIcon}>✉</Text><View><Text style={s.fieldLabel}>Registered email address</Text><Text style={s.fieldHelp}>We never show whether this email has an account</Text></View></View>
+          <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="name@email.com" style={s.input} />
+        </> : mode === "up" ? <>
           <View style={s.fieldHeading}><Text style={s.fieldIcon}>@</Text><View><Text style={s.fieldLabel}>Username</Text><Text style={s.fieldHelp}>Your public Nook name</Text></View></View>
           <TextInput value={username} onChangeText={setUsername} autoCapitalize="none"
             placeholder="Example: Logan" style={s.input} />
@@ -142,7 +157,7 @@ function Auth() {
           </View>
         </> : <><View style={s.fieldHeading}><Text style={s.fieldIcon}>@</Text><View><Text style={s.fieldLabel}>Username or email</Text><Text style={s.fieldHelp}>Either one works</Text></View></View><TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none"
           placeholder="Logan or name@email.com" style={s.input} /></>}
-        <View style={s.passwordLabelRow}><View style={s.fieldHeading}><Text style={s.fieldIcon}>●</Text><View><Text style={s.fieldLabel}>Password</Text><Text style={s.fieldHelp}>{mode === "up" ? "Create a strong, unique password" : "Your registered Nook password"}</Text></View></View><TouchableOpacity onPress={() => setShowPassword(!showPassword)}><Text style={s.showText}>{showPassword ? "Hide" : "Show"}</Text></TouchableOpacity></View>
+        {mode !== "recover" && <><View style={s.passwordLabelRow}><View style={s.fieldHeading}><Text style={s.fieldIcon}>●</Text><View><Text style={s.fieldLabel}>Password</Text><Text style={s.fieldHelp}>{mode === "up" ? "Create a strong, unique password" : "Your registered Nook password"}</Text></View></View><TouchableOpacity onPress={() => setShowPassword(!showPassword)}><Text style={s.showText}>{showPassword ? "Hide" : "Show"}</Text></TouchableOpacity></View>
         <TextInput
           value={password}
           onChangeText={setPassword}
@@ -160,19 +175,21 @@ function Auth() {
             <Text style={[s.ruleMark, passed && s.rulePassed]}>{passed ? "✓" : "○"}</Text>
             <Text style={[s.ruleText, passed && s.ruleTextPassed]}>{label}</Text>
           </View>)}
-        </View>}
+        </View>}</>}
         <TouchableOpacity
           disabled={busy}
-          onPress={() => submit(mode)}
+          onPress={() => mode === "recover" ? sendRecovery() : submit(mode)}
           style={s.primary}
         >
           <Text style={s.primaryText}>
-            {busy ? "Please wait…" : mode === "up" ? "Create my account" : "Sign in"}
+            {busy ? "Please wait…" : mode === "up" ? "Create my account" : mode === "recover" ? "Send reset link" : "Sign in"}
           </Text>
         </TouchableOpacity>
         <Text style={s.note}>
-          {mode === "up" ? "Nook is for adults 18+. We’ll email you a verification link." : "Use your username or email and registered password."}
+          {mode === "up" ? "Nook is for adults 18+. We’ll email you a verification link." : mode === "recover" ? "The link opens Nook securely on this phone." : "Use your username or email and registered password."}
         </Text>
+        {mode === "in" && <TouchableOpacity onPress={() => setMode("recover")} style={s.recoveryButton}><Text style={s.recoveryText}>Forgot password?</Text></TouchableOpacity>}
+        {mode === "recover" && <TouchableOpacity onPress={() => setMode("in")} style={s.recoveryButton}><Text style={s.recoveryText}>Back to sign in</Text></TouchableOpacity>}
       </View>
       </ScrollView>
     </SafeAreaView>
@@ -247,4 +264,6 @@ const s = StyleSheet.create({
   },
   primaryText: { color: "#FFF", fontWeight: "900" },
   note: { color: "#68716D", fontSize: 12, lineHeight: 17, textAlign: "center", marginTop: 12 },
+  recoveryButton: { alignSelf: "center", paddingVertical: 14 },
+  recoveryText: { color: "#247064", fontWeight: "900", fontSize: 13 },
 });

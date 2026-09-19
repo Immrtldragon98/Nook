@@ -144,6 +144,9 @@ create table public.plans (
   language text not null,
   spots smallint not null check (spots between 2 and 12),
   trusted_only boolean not null default false,
+  venue_name text not null default '',
+  budget_per_person smallint check (budget_per_person is null or budget_per_person between 0 and 100000),
+  plan_note text not null default '' check (char_length(plan_note) <= 240),
   created_at timestamptz not null default now()
 );
 create table public.connection_qr_tokens (

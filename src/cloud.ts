@@ -23,7 +23,8 @@ export type CloudRequest = {
 export type CloudPlan = {
   id: string; creator_id: string; title: string; category: string; city: string;
   area: string; starts_at: string; language: string; spots: number;
-  trusted_only: boolean; created_at: string;
+  trusted_only: boolean; venue_name: string; budget_per_person: number | null;
+  plan_note: string; created_at: string;
 };
 export type CloudPlanRequest = { plan_id: string; status: string; created_at: string; plan: CloudPlan };
 export type CloudNotification = {
@@ -338,6 +339,13 @@ export async function getPrivateAvatarUrl(path: string) {
   const { data, error } = await supabase.storage.from("avatars").createSignedUrl(path, 3600);
   if (error) throw error;
   return data.signedUrl;
+}
+
+export async function deleteMyCloudAccount() {
+  const { error } = await supabase.functions.invoke("delete-account", { method: "POST" });
+  if (error) throw error;
+  const { error: signOutError } = await supabase.auth.signOut();
+  if (signOutError) throw signOutError;
 }
 export function watchCloudGroups(onChange: () => void) {
   const channel = supabase

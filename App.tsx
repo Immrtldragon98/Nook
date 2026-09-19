@@ -3,7 +3,6 @@ import {
   Alert,
   BackHandler,
   Image,
-  Linking,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -50,7 +49,7 @@ import {
 import { QRCodeMatrix } from "./src/QRCodeMatrix";
 import { AuthGate } from "./src/AuthGate";
 import { enablePlanNotifications, notificationPermissionGranted, syncApprovedPlanReminders } from "./src/notifications";
-import { cloudEnabled } from "./src/supabase";
+import { cloudEnabled, supabase } from "./src/supabase";
 import {
   createCloudGroup,
   createCloudPlan,
@@ -73,6 +72,7 @@ import {
   requestCloudConnection,
   hasCloudConnection,
   getCloudAccountSummary,
+  deleteMyCloudAccount,
   getPrivateAvatarUrl,
   updateCloudProfileDetails,
   uploadCloudAvatar,
@@ -499,6 +499,9 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
   const [time, setTime] = useState("");
   const [language, setLanguage] = useState("English");
   const [spots, setSpots] = useState("4");
+  const [venue, setVenue] = useState("");
+  const [budget, setBudget] = useState("");
+  const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => { getProfile(db).then(setProfile); }, []);
   async function submit() {
@@ -516,6 +519,9 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
     const count = Number(spots);
     if (!Number.isInteger(count) || count < 2 || count > 12)
       return Alert.alert("Check group size", "Choose between 2 and 12 people.");
+    const budgetValue = budget.trim() ? Number(budget) : null;
+    if (budgetValue !== null && (!Number.isInteger(budgetValue) || budgetValue < 0 || budgetValue > 100000))
+      return Alert.alert("Check budget", "Add a realistic per-person amount, or leave it blank.");
     setSaving(true);
     try {
       if (!profile) throw new Error("Profile unavailable");
@@ -528,6 +534,9 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
         language,
         spots: count,
         trusted_only: kind === "trip",
+        venue_name: venue.trim(),
+        budget_per_person: budgetValue,
+        plan_note: note.trim().slice(0, 240),
       });
       Alert.alert("Plan published", "Friends in your city can now see it from anywhere.");
       await onCreated();
@@ -584,18 +593,7 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
           </Text>
         </TouchableOpacity>
       </View>
-      {kind === "dine" && <View style={styles.partnerCard}>
-        <View style={{flex:1}}><Text style={styles.partnerTitle}>Need a restaurant?</Text><Text style={styles.meta}>Explore first, then return and publish the plan.</Text></View>
-        <TouchableOpacity onPress={()=>Linking.openURL("https://www.swiggy.com/restaurants")} style={styles.partnerButton}><Text style={styles.partnerButtonText}>Open Swiggy</Text></TouchableOpacity>
-      </View>}
-      {kind === "event" && <View style={styles.partnerCard}>
-        <View style={{flex:1}}><Text style={styles.partnerTitle}>Find a public event</Text><Text style={styles.meta}>Choose the event before inviting the group.</Text></View>
-        <TouchableOpacity onPress={()=>Linking.openURL("https://in.bookmyshow.com/explore/events")} style={styles.partnerButton}><Text style={styles.partnerButtonText}>Find events</Text></TouchableOpacity>
-      </View>}
-      {kind === "trip" && <View style={styles.partnerCard}>
-        <View style={{flex:1}}><Text style={styles.partnerTitle}>Compare the trip cost</Text><Text style={styles.meta}>Check transport and stay options before publishing.</Text></View>
-        <TouchableOpacity onPress={()=>Linking.openURL("https://www.makemytrip.com/")} style={styles.partnerButton}><Text style={styles.partnerButtonText}>MakeMyTrip</Text></TouchableOpacity>
-      </View>}
+      {kind !== "local" && <NativePlanGuide kind={kind} onChoose={(value) => setTitle(value)} />}
       {kind === "trip" && (
         <>
           <View style={styles.tripHero}>
@@ -634,6 +632,15 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
             : "Badminton after work"
         }
       />
+      {kind !== "local" && <>
+        <Field label={kind === "trip" ? "Public start point or destination" : kind === "dine" ? "Restaurant name (optional)" : "Venue or organiser (optional)"}
+          value={venue} onChangeText={setVenue}
+          placeholder={kind === "trip" ? "Cubbon Park Metro entrance" : kind === "dine" ? "Add after choosing together" : "Add when confirmed"} />
+        <Field label="Expected cost per person (₹, optional)" value={budget} onChangeText={setBudget}
+          placeholder="Example: 500" keyboardType="number-pad" />
+        <Field label="Helpful plan note (optional)" value={note} onChangeText={(value)=>setNote(value.slice(0,240))}
+          placeholder="Public meeting point, what to bring, or ticket information" />
+      </>}
       <ChoiceField label={kind === "trip" ? "Public meeting area" : "Approximate area"} options={bengaluruAreas} value={area} onChange={setArea} />
       <ChoiceField label="Choose a day" options={nextPlanDays().map((d) => d.toISOString())} value={day?.toISOString() ?? ""} onChange={(v) => setDay(new Date(v))} format={(v) => new Date(v).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} />
       <ChoiceField label={kind === "trip" ? "Departure time" : "Start time"} options={planTimes} value={time} onChange={setTime} format={(v) => { const [h,m]=v.split(":").map(Number); return new Date(2000,0,1,h,m).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}); }} />
@@ -679,6 +686,19 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
       <View style={{ height: 90 }} />
     </ScrollView>
   );
+}
+
+function NativePlanGuide({ kind, onChoose }: { kind: "dine" | "event" | "trip"; onChoose: (value: string) => void }) {
+  const ideas = kind === "dine"
+    ? ["Breakfast and filter coffee", "South Indian dinner", "Korean food night", "Street-food walk"]
+    : kind === "event"
+      ? ["Stand-up comedy meetup", "Art workshop", "Live music evening", "Board-game night"]
+      : ["Nandi Hills sunrise day trip", "Mysuru day trip", "Ramanagara hike", "Nature walk and picnic"];
+  return <View style={styles.nativeGuide}>
+    <Text style={styles.nativeGuideTitle}>Nook ideas</Text>
+    <Text style={styles.nativeGuideCopy}>Choose an idea, then make it yours. Booking and payment stay outside Nook.</Text>
+    <View style={styles.wrap}>{ideas.map((idea) => <TouchableOpacity key={idea} onPress={() => onChoose(idea)} style={styles.ideaChip}><Text style={styles.ideaChipText}>{idea}</Text></TouchableOpacity>)}</View>
+  </View>;
 }
 
 function Field({
@@ -1570,6 +1590,8 @@ function Profile({
   const [avatarUrl, setAvatarUrl] = useState("");
   const [bio, setBio] = useState(profile.bio || "");
   const [editing, setEditing] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     getCloudAccountSummary().then(async (summary) => {
@@ -1603,6 +1625,15 @@ function Profile({
     } catch (error:any) {
       Alert.alert("Profile not saved", error?.message || "Please try again.");
     } finally { setSaving(false); }
+  }
+  async function saveNewPassword() {
+    const strong = newPassword.length >= 10 && /[A-Z]/.test(newPassword) && /[a-z]/.test(newPassword) && /\d/.test(newPassword) && /[^A-Za-z0-9]/.test(newPassword);
+    if (!strong) return Alert.alert("Choose a stronger password", "Use 10+ characters with uppercase, lowercase, a number and a symbol.");
+    setSaving(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setSaving(false);
+    if (error) Alert.alert("Password not changed", "For your safety, sign in again or use a fresh reset link, then try again.");
+    else { setNewPassword(""); setChangingPassword(false); Alert.alert("Password changed", "Your Nook password has been updated."); }
   }
   useEffect(() => { if (mode === "show") createConnectionQrToken().then(setCloudQr).catch(() => {
     Alert.alert("Could not create QR", "Connect to the internet and try again."); setMode("profile");
@@ -1729,7 +1760,16 @@ function Profile({
         <Text style={styles.accountValue}>{account?.email || "Loading account…"}</Text>
         <Text style={styles.accountHint}>Gender: {account?.gender?.replaceAll("_", " ") || "not shared"} · Contact details stay hidden until you choose to share.</Text>
       </View>
+      {changingPassword ? <View style={styles.profileEditor}>
+        <Text style={styles.fieldLabel}>New password</Text>
+        <TextInput value={newPassword} onChangeText={setNewPassword} secureTextEntry placeholder="10+ characters, upper/lowercase, number, symbol" style={styles.input} />
+        <TouchableOpacity disabled={saving} onPress={saveNewPassword} style={styles.primaryWide}><Text style={styles.primaryText}>{saving ? "Saving…" : "Update password"}</Text></TouchableOpacity>
+        <TouchableOpacity onPress={()=>{setChangingPassword(false);setNewPassword("");}} style={styles.signOutButton}><Text style={styles.editText}>Cancel</Text></TouchableOpacity>
+      </View> : <TouchableOpacity onPress={()=>setChangingPassword(true)} style={styles.editButton}><Text style={styles.editText}>Change password</Text></TouchableOpacity>}
       <TouchableOpacity onPress={()=>setEditing(true)} style={styles.editButton}><Text style={styles.editText}>Edit photo & bio</Text></TouchableOpacity>
+      <TouchableOpacity onPress={() => Alert.alert("Delete Nook account?", "This permanently removes your profile, plans, QR connections and private photo. It cannot be undone.", [{text:"Cancel",style:"cancel"},{text:"Delete account",style:"destructive",onPress:()=>deleteMyCloudAccount().catch(()=>Alert.alert("Could not delete account", "Please check your connection and try again."))}])} style={styles.deleteButton}>
+        <Text style={styles.deleteText}>Delete account and data</Text>
+      </TouchableOpacity>
       <TouchableOpacity onPress={() => Alert.alert("Sign out?", "Your local profile stays on this phone.", [{text:"Cancel",style:"cancel"},{text:"Sign out",style:"destructive",onPress:()=>getCloudAccountSummary(true)}])} style={styles.signOutButton}>
         <Text style={styles.signOutText}>Sign out</Text>
       </TouchableOpacity>
@@ -2240,10 +2280,11 @@ const styles = StyleSheet.create({
   kindEmoji: { fontSize: 27, marginBottom: 13 },
   kindTitle: { fontSize: 16, fontWeight: "900", color: "#17211F" },
   kindCopy: { fontSize: 12, lineHeight: 17, color: "#68716D", marginTop: 5 },
-  partnerCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFF", borderRadius: 18, borderWidth: 1, borderColor: "#E7E5DE", padding: 14, marginTop: 14 },
-  partnerTitle: { fontSize: 14, fontWeight: "900", color: "#17211F", marginBottom: 3 },
-  partnerButton: { backgroundColor: "#7EA6FA", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
-  partnerButtonText: { color: "#FFF", fontWeight: "900", fontSize: 11 },
+  nativeGuide: { backgroundColor: "#F0F5FF", borderRadius: 18, borderWidth: 1, borderColor: "#DCE7FC", padding: 14, marginTop: 14 },
+  nativeGuideTitle: { fontSize: 14, fontWeight: "900", color: "#2A4B91" },
+  nativeGuideCopy: { fontSize: 12, color: "#61729A", lineHeight: 17, marginTop: 3, marginBottom: 10 },
+  ideaChip: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#D4E0FA", borderRadius: 20, paddingHorizontal: 11, paddingVertical: 8 },
+  ideaChipText: { color: "#365A9F", fontSize: 11, fontWeight: "800" },
   formRow: {
     height: 54,
     flexDirection: "row",
@@ -2380,6 +2421,8 @@ const styles = StyleSheet.create({
   accountHint: { fontSize: 12, color: "#765D37", lineHeight: 18, marginTop: 8, textTransform: "capitalize" },
   signOutButton: { alignItems: "center", paddingVertical: 14, marginTop: 9 },
   signOutText: { color: "#A04437", fontWeight: "800" },
+  deleteButton: { alignItems: "center", borderWidth: 1, borderColor: "#F2D2CC", backgroundColor: "#FFF7F5", borderRadius: 14, paddingVertical: 13, marginTop: 12 },
+  deleteText: { color: "#B24F43", fontWeight: "900", fontSize: 13 },
   qrActions: { flexDirection: "row", gap: 10, marginTop: 14 },
   qrAction: {
     flex: 1,
