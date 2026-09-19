@@ -1604,7 +1604,7 @@ function Profile({
 }) {
   const db = useSQLiteContext();
   const initial = profile.name.slice(0, 1).toUpperCase();
-  const [mode, setMode] = useState<"profile" | "show" | "scan" | "moderation">("profile");
+  const [mode, setMode] = useState<"profile" | "show" | "scan" | "moderation" | "safety">("profile");
   const [nonce, setNonce] = useState(Crypto.randomUUID());
   const [cloudQr, setCloudQr] = useState<{token:string;ownerId:string;expiresAt:string}|null>(null);
   const [account, setAccount] = useState<{username:string;email:string;emailVerified:boolean;gender:string;age:number|null;faceVerified:boolean;attendedPlans:number;bio:string;avatarPath:string}|null>(null);
@@ -1703,6 +1703,7 @@ function Profile({
       />
     );
   if (mode === "moderation") return <ModeratorDesk onClose={() => setMode("profile")} />;
+  if (mode === "safety") return <SafetyCentre onClose={() => setMode("profile")} />;
   return (
     <ScrollView contentContainerStyle={[styles.page, { paddingTop: 8, paddingBottom: 118 }]} showsVerticalScrollIndicator={false}>
       <View style={styles.profileCard}>
@@ -1775,7 +1776,7 @@ function Profile({
       <View style={styles.trustPanel}>
         <TrustRow icon="✉" title="Email" value={account?.emailVerified ? "Verified" : "Pending"} done={!!account?.emailVerified} />
         <TrustRow icon="☺" title="Face approval" value={account?.faceVerified ? "Approved" : "Not started"} done={!!account?.faceVerified} />
-        <TrustRow icon="☎" title="Phone number" value="Coming next" done={false} />
+        <TrustRow icon="☎" title="Phone number" value="Not collected" done={false} />
         <TrustRow icon="✓" title="Trusted trip access" value={`${account?.attendedPlans ?? 0}/3 plans`} done={(account?.attendedPlans ?? 0) >= 3} last />
       </View>
       <Text style={styles.sectionTitle}>Account & privacy</Text>
@@ -1791,6 +1792,7 @@ function Profile({
         <TouchableOpacity onPress={()=>{setChangingPassword(false);setNewPassword("");}} style={styles.signOutButton}><Text style={styles.editText}>Cancel</Text></TouchableOpacity>
       </View> : <TouchableOpacity onPress={()=>setChangingPassword(true)} style={styles.editButton}><Text style={styles.editText}>Change password</Text></TouchableOpacity>}
       <TouchableOpacity onPress={()=>setEditing(true)} style={styles.editButton}><Text style={styles.editText}>Edit photo & bio</Text></TouchableOpacity>
+      <TouchableOpacity onPress={() => setMode("safety")} style={styles.safetyCentreButton}><Text style={styles.safetyCentreText}>Safety, privacy & community rules</Text></TouchableOpacity>
       {moderator && <TouchableOpacity onPress={() => setMode("moderation")} style={styles.moderatorButton}><Text style={styles.moderatorButtonText}>Open moderator case queue</Text></TouchableOpacity>}
       <TouchableOpacity onPress={() => Alert.alert("Delete Nook account?", "This permanently removes your profile, plans, QR connections and private photo. It cannot be undone.", [{text:"Cancel",style:"cancel"},{text:"Delete account",style:"destructive",onPress:()=>deleteMyCloudAccount().catch(()=>Alert.alert("Could not delete account", "Please check your connection and try again."))}])} style={styles.deleteButton}>
         <Text style={styles.deleteText}>Delete account and data</Text>
@@ -1822,6 +1824,25 @@ function ModeratorDesk({ onClose }: { onClose: () => void }) {
     </View>)}
     <View style={{height:90}} />
   </ScrollView>;
+}
+
+function SafetyCentre({ onClose }: { onClose: () => void }) {
+  return <ScrollView contentContainerStyle={styles.page}>
+    <TouchableOpacity onPress={onClose} style={styles.detailBack}><Text style={styles.detailBackText}>‹ Profile</Text></TouchableOpacity>
+    <Text style={styles.h1}>Safety centre</Text>
+    <Text style={styles.intro}>Nook is for adults making real-world plans. Use good judgement; an app cannot guarantee another person’s behaviour.</Text>
+    <SafetyCard title="Meet safely" body="Meet first in a busy public place. Tell someone you trust where you are going, arrange your own transport, and leave if anything feels wrong." />
+    <SafetyCard title="Your privacy" body="Your email, age, gender, phone number and private profile photo are not shown to other members. Approximate areas appear before approval; exact meeting details should be shared only when needed." />
+    <SafetyCard title="Report and block" body="Report unsafe, misleading or inappropriate activities. Block prevents new plan, community and QR connection requests with that member. Reports are private and reviewed by people, not an automatic score." />
+    <SafetyCard title="Community rules" body="No harassment, hate, sexual exploitation, scams, impersonation, illegal activity, or sharing another person’s personal details. Nook may restrict accounts that violate these rules." />
+    <SafetyCard title="Your choices" body="You can edit your profile, change your password, sign out, or permanently delete your account and data from Profile. Deletion removes your hosted groups, activities, QR connections and private photo." />
+    <Text style={styles.legalNote}>By using Nook you confirm that you are 18 or older and accept these community rules. This is the in-app beta policy; obtain reviewed legal Terms and Privacy Policy before a public Play Store launch.</Text>
+    <View style={{height:90}} />
+  </ScrollView>;
+}
+
+function SafetyCard({ title, body }: { title: string; body: string }) {
+  return <View style={styles.safetyCard}><Text style={styles.safetyCardTitle}>{title}</Text><Text style={styles.safetyCardBody}>{body}</Text></View>;
 }
 
 function TrustRow({icon,title,value,done,last=false}:{icon:string;title:string;value:string;done:boolean;last?:boolean}) {
@@ -2472,10 +2493,16 @@ const styles = StyleSheet.create({
   deleteText: { color: "#B24F43", fontWeight: "900", fontSize: 13 },
   moderatorButton: { alignItems: "center", borderWidth: 1, borderColor: "#D8D0F0", backgroundColor: "#F6F3FF", borderRadius: 14, paddingVertical: 13, marginTop: 12 },
   moderatorButtonText: { color: "#503A82", fontWeight: "900", fontSize: 13 },
+  safetyCentreButton: { alignItems: "center", borderWidth: 1, borderColor: "#D5E8E1", backgroundColor: "#F2FAF7", borderRadius: 14, paddingVertical: 13, marginTop: 12 },
+  safetyCentreText: { color: "#247064", fontWeight: "900", fontSize: 13 },
   caseCard: { backgroundColor: "#FFF", borderRadius: 18, borderWidth: 1, borderColor: "#E7E5DE", padding: 15, marginTop: 12 },
   caseType: { color: "#65558F", fontWeight: "900", fontSize: 10, letterSpacing: 0.6 },
   caseReason: { color: "#17211F", fontWeight: "900", fontSize: 14, marginTop: 6 },
   caseDate: { color: "#8A918E", fontSize: 10, marginTop: 8 },
+  safetyCard: { backgroundColor: "#FFF", borderWidth: 1, borderColor: "#E7E5DE", borderRadius: 18, padding: 16, marginTop: 12 },
+  safetyCardTitle: { color: "#17211F", fontSize: 15, fontWeight: "900" },
+  safetyCardBody: { color: "#68716D", fontSize: 13, lineHeight: 20, marginTop: 6 },
+  legalNote: { color: "#7A827F", fontSize: 11, lineHeight: 17, marginTop: 18 },
   qrActions: { flexDirection: "row", gap: 10, marginTop: 14 },
   qrAction: {
     flex: 1,
