@@ -1,9 +1,8 @@
+import { SafeAreaView, ScrollView } from "./mobile";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
   Linking,
-  SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -208,7 +207,7 @@ function Screen({ title }: { title: string }) {
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8F6EF", justifyContent: "center" },
   scroll: { flexGrow: 1, justifyContent: "center", paddingVertical: 18 },
-  card: { margin: 22, padding: 24, borderRadius: 26, backgroundColor: "#FFF" },
+  card: { margin: 16, padding: 20, borderRadius: 26, backgroundColor: "#FFF" },
   brand: {
     fontSize: 16,
     fontWeight: "900",
@@ -232,7 +231,8 @@ const s = StyleSheet.create({
   tabText: { color: "#68716D", fontWeight: "800" },
   tabTextActive: { color: "#FFF" },
   input: {
-    height: 52,
+    minHeight: 52,
+    paddingVertical: 12,
     borderWidth: 1,
     borderColor: "#DDDAD0",
     borderRadius: 15,
@@ -246,7 +246,7 @@ const s = StyleSheet.create({
   passwordLabelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   showText: { color: "#247064", fontWeight: "900", fontSize: 12, marginBottom: 7 },
   passwordRules: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 14 },
-  ruleRow: { flexDirection: "row", alignItems: "center", gap: 5, width: "47%" },
+  ruleRow: { flexDirection: "row", alignItems: "center", gap: 5, flexBasis: "47%", flexGrow: 1 },
   ruleMark: { color: "#A2A9A6", fontWeight: "900", fontSize: 13 },
   rulePassed: { color: "#247064" },
   ruleText: { color: "#7B8581", fontSize: 10, fontWeight: "700" },
