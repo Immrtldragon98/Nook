@@ -1,15 +1,16 @@
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaView, ScrollView } from "./src/mobile";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   BackHandler,
   Image,
-  SafeAreaView,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
@@ -268,7 +269,7 @@ export default function App() {
       <Nook />
     </SQLiteProvider>
   );
-  return cloudEnabled ? <AuthGate>{app}</AuthGate> : app;
+  return <SafeAreaProvider>{cloudEnabled ? <AuthGate>{app}</AuthGate> : app}</SafeAreaProvider>;
 }
 
 function Nook() {
@@ -317,13 +318,14 @@ function Nook() {
   }, [profile]);
   useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (selectedPlan) { setSelectedPlan(null); return true; }
       if (tab === "Discover") return false;
       setTab("Discover");
       return true;
     });
     return () => subscription.remove();
-  }, [tab]);
-  const allPlans = useMemo(() => [...localPlans, ...hangouts], [localPlans]);
+  }, [tab, selectedPlan]);
+  const allPlans = useMemo(() => cloudEnabled ? localPlans : [...localPlans, ...hangouts], [localPlans]);
   const visible = useMemo(
     () =>
       category === "All"
@@ -404,6 +406,8 @@ function toHangout(p: StoredPlan): Hangout {
 }
 
 function Discover({ profile, visible, category, setCategory, joined, setJoined, onSelect }: any) {
+  const { width, fontScale } = useWindowDimensions();
+  const singleColumn = width < 360 || fontScale > 1.2;
   const palette: Record<string, { bg: string; ink: string; soft: string }> = {
     Sports: { bg: "#DDF4EA", ink: "#145E4F", soft: "#EFFAF6" },
     "Women only": { bg: "#F7E5F1", ink: "#813B68", soft: "#FFF5FB" },
@@ -465,12 +469,16 @@ function Discover({ profile, visible, category, setCategory, joined, setJoined, 
         <Text style={styles.sectionTitle}>Happening nearby</Text>
         <Text style={styles.muted}>{visible.length} activities</Text>
       </View>
+      {visible.length === 0 && <View style={styles.detailCard}>
+        <Text style={styles.cardTitle}>No activities here yet</Text>
+        <Text style={styles.meta}>Try another category, or create a plan for your area using the Create tab.</Text>
+      </View>}
       <View style={styles.activityGrid}>
       {visible.map((h: Hangout) => {
         const isJoined = joined.includes(h.id);
         const tone = palette[h.category] ?? { bg: "#E8F2EF", ink: "#247064", soft: "#F5FAF8" };
         return (
-          <TouchableOpacity key={h.id} activeOpacity={0.88} onPress={() => onSelect(h)} style={[styles.activityTile,{backgroundColor:tone.soft}]}>
+          <TouchableOpacity key={h.id} activeOpacity={0.88} onPress={() => onSelect(h)} style={[styles.activityTile, singleColumn && { width: "100%" },{backgroundColor:tone.soft}]}>
             <View style={styles.cardTop}>
               <View style={[styles.icon,{backgroundColor:tone.bg}]}>
                 <Text style={styles.iconText}>{h.emoji}</Text>
@@ -478,7 +486,7 @@ function Discover({ profile, visible, category, setCategory, joined, setJoined, 
               <View style={[styles.statusDot,{backgroundColor:h.trustedOnly?"#6057B2":h.spots<=2?"#E9A23B":"#2E8B72"}]} />
             </View>
             <Text style={[styles.tileCategory,{color:tone.ink}]}>{h.category.toUpperCase()}</Text>
-            <Text style={styles.tileTitle} numberOfLines={2}>{h.title}</Text>
+            <Text style={styles.tileTitle} numberOfLines={singleColumn ? undefined : 2}>{h.title}</Text>
             <Text style={styles.tileTime} numberOfLines={1}>{h.time}</Text>
             <Text style={styles.tileArea} numberOfLines={1}>⌖ {h.area}</Text>
             <View style={styles.tileFooter}>
@@ -2011,6 +2019,9 @@ function Nav({
       {items.map((i) => (
         <TouchableOpacity
           key={i.name}
+          accessibilityRole="tab"
+          accessibilityLabel={i.name}
+          accessibilityState={{ selected: active === i.name }}
           style={[styles.navItem, i.name === "Create" && styles.navCreate, active === i.name && i.name !== "Create" && styles.navItemActive]}
           onPress={() => onChange(i.name)}
         >
@@ -2028,7 +2039,7 @@ function Nav({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F6F5F0" },
-  shell: { flex: 1 },
+  shell: { flex: 1, width: "100%", maxWidth: 600, alignSelf: "center" },
   page: { padding: 16, paddingTop: 18 },
   detailPage: { padding: 20, paddingTop: 16, paddingBottom: 40 },
   detailBack: { alignSelf: "flex-start", paddingVertical: 10, paddingRight: 20 },
@@ -2058,6 +2069,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap", gap: 12,
   },
   headerIdentity: { flexDirection: "row", alignItems: "center", gap: 9 },
   brandIcon: { width: 42, height: 42, borderRadius: 14 },
@@ -2083,7 +2095,7 @@ const styles = StyleSheet.create({
   storyMeta: { color: "#BFD9DF", fontSize: 12, fontWeight: "700", marginTop: 11 },
   storyIcon: { width: 76, height: 76, borderRadius: 24, backgroundColor: "#124F64", alignItems: "center", justifyContent: "center", transform: [{rotate:"7deg"}] },
   storyEmoji: { fontSize: 38, transform: [{rotate:"-7deg"}] },
-  legendRow: { flexDirection: "row", gap: 14, alignItems: "center", marginBottom: 8, paddingHorizontal: 3 },
+  legendRow: { flexDirection: "row", flexWrap: "wrap", gap: 14, alignItems: "center", marginBottom: 8, paddingHorizontal: 3 },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendDot: { width: 7, height: 7, borderRadius: 4 },
   legendText: { color: "#67716D", fontSize: 10, fontWeight: "700" },
@@ -2128,7 +2140,7 @@ const styles = StyleSheet.create({
     borderColor: "#ECEAE3",
   },
   activityGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 10 },
-  activityTile: { width: "48.4%", minHeight: 220, borderRadius: 22, padding: 14, borderWidth: 1, borderColor: "#E9E8E2" },
+  activityTile: { width: "48%", minHeight: 220, borderRadius: 22, padding: 14, borderWidth: 1, borderColor: "#E9E8E2" },
   statusDot: { width: 10, height: 10, borderRadius: 5 },
   tileCategory: { fontSize: 9, fontWeight: "900", letterSpacing: 1.1, marginTop: 2 },
   tileTitle: { fontSize: 17, lineHeight: 21, minHeight: 44, fontWeight: "900", color: "#15221F", marginTop: 7 },
@@ -2183,7 +2195,8 @@ const styles = StyleSheet.create({
   joined: { backgroundColor: "#82908B" },
   joinText: { color: "white", fontWeight: "800" },
   nav: {
-    height: 70,
+    minHeight: 76,
+    paddingVertical: 8,
     backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
     borderTopColor: "#E6E6E0",
@@ -2192,13 +2205,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
     paddingHorizontal: 7,
   },
-  navItem: { alignItems: "center", justifyContent: "center", minWidth: 58, height: 52, borderRadius: 17 },
+  navItem: { alignItems: "center", justifyContent: "center", flex: 1, minHeight: 56, paddingVertical: 6, borderRadius: 17 },
   navItemActive: { backgroundColor: "#EAF4F1" },
-  navCreate: { backgroundColor: "#E76F51", width: 52, minWidth: 52, height: 52, borderRadius: 18, marginTop: -22, shadowColor: "#E76F51", shadowOpacity: .25, shadowRadius: 7, elevation: 5 },
+  navCreate: { backgroundColor: "#E76F51", minHeight: 56, borderRadius: 18, marginHorizontal: 4, shadowColor: "#E76F51", shadowOpacity: .25, shadowRadius: 7, elevation: 5 },
   navIcon: { fontSize: 20, color: "#87918D" },
   navCreateIcon: { color: "#FFF", fontSize: 28, lineHeight: 29 },
-  navCreateText: { color: "#7B534B", position: "absolute", top: 56 },
-  navText: { fontSize: 9, fontWeight: "800", marginTop: 3, color: "#87918D" },
+  navCreateText: { color: "#FFFFFF" },
+  navText: { fontSize: 10, textAlign: "center", fontWeight: "800", marginTop: 3, color: "#87918D" },
   navActive: { color: "#126957" },
   empty: { marginTop: 70, alignItems: "center", paddingHorizontal: 28 },
   emptyEmoji: { fontSize: 42, marginBottom: 18 },
