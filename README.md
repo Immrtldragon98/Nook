@@ -1,4 +1,4 @@
-# Nook Android
+# Nook for Android and iPhone
 
 An activity-first friendship app for India. People discover small, intentional plans by activity, approximate place, time and language instead of swiping through profiles.
 
@@ -83,3 +83,7 @@ This build demonstrates the product rules locally. Gender/face verification, cro
 ## Next milestone
 
 Verify the complete two-phone signup, group join and host-approval flow on physical Android devices. Do not add chat or maps until access-control rules are tested.
+
+## Store builds (1.3.0)
+
+Shared phone layout handles safe areas, form keyboards, larger text discovery cards and accessible bottom navigation. Production Android AAB and iOS profiles are in `eas.json`. See [store release handoff](docs/STORE_RELEASE.md) for signing, submission blockers and device acceptance. Store submission and physical phone testing are still pending.

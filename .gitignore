@@ -6,3 +6,12 @@ android/
 *.db-journal
 *.db-wal
 *.db-shm
+
+ios/
+dist/
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+credentials.json
