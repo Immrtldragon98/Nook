@@ -9,34 +9,59 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import { clearPlanReminders } from "./notifications";
 
-export function AuthGate({ children }: { children: React.ReactNode }) {
+export function AuthGate({ children }: { children: (userId: string) => React.ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   useEffect(() => {
+    let active = true;
+    let ready = false;
+    let observedAuthEvent = false;
+    let latest: Session | null = null;
+    let latestUserId = "";
     async function acceptEmailLink(url: string | null) {
-      if (!url) return;
+      if (!url || !url.startsWith("nook://auth/callback")) return;
       const fragment = url.split("#")[1] ?? url.split("?")[1] ?? "";
       const params = new URLSearchParams(fragment);
       const access_token = params.get("access_token");
       const refresh_token = params.get("refresh_token");
-      if (access_token && refresh_token)
-        await supabase.auth.setSession({ access_token, refresh_token });
+      if (access_token && refresh_token) {
+        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (error) throw error;
+      }
     }
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    Linking.getInitialURL().then(acceptEmailLink);
-    const link = Linking.addEventListener("url", ({ url }) => {
-      acceptEmailLink(url).catch(() => Alert.alert("Confirmation failed", "Please open the newest confirmation email."));
+    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+      observedAuthEvent = true;
+      latest = next;
+      if (ready) {
+        if (!next || latestUserId !== next.user.id) clearPlanReminders().catch(() => {});
+        latestUserId = next?.user.id ?? "";
+        AsyncStorage.setItem("nook-reminder-owner", latestUserId).catch(() => {});
+      }
+      if (active && ready) setSession(next);
     });
-    const { data } = supabase.auth.onAuthStateChange((_event, next) =>
-      setSession(next),
-    );
-    return () => { data.subscription.unsubscribe(); link.remove(); };
+    (async () => {
+      const { data: initial, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      if (!observedAuthEvent) latest = initial.session;
+      const previousOwner = await AsyncStorage.getItem("nook-reminder-owner");
+      latestUserId = latest?.user.id ?? "";
+      if (!latestUserId || previousOwner !== latestUserId) await clearPlanReminders().catch(() => {});
+      await AsyncStorage.setItem("nook-reminder-owner", latestUserId);
+      ready = true;
+      if (active) setSession(latest);
+    })().catch(() => { ready = true; if (active) setSession(null); });
+    const confirmationFailed = () => Alert.alert("Confirmation failed", "Please open the newest confirmation email.");
+    Linking.getInitialURL().then(acceptEmailLink).catch(confirmationFailed);
+    const link = Linking.addEventListener("url", ({ url }) => { acceptEmailLink(url).catch(confirmationFailed); });
+    return () => { active = false; data.subscription.unsubscribe(); link.remove(); };
   }, []);
   if (session === undefined) return <Screen title="Opening Nook…" />;
   if (!session) return <Auth />;
-  return <>{children}</>;
+  return <React.Fragment key={session.user.id}>{children(session.user.id)}</React.Fragment>;
 }
 function Auth() {
   const [mode, setMode] = useState<"in" | "up" | "recover">("in");
@@ -60,12 +85,15 @@ function Auth() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
       return Alert.alert("Check email", "Enter the email address for your Nook account.");
     setBusy(true);
+    try {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
       redirectTo: "nook://auth/callback",
     });
     setBusy(false);
     if (error) Alert.alert("Could not send reset email", "Please wait a minute and try again.");
     else Alert.alert("Check your email", "Open the reset link on this phone, then choose a new password in Profile → Account & privacy.");
+    } catch { Alert.alert("Could not send reset email", "Check your connection and try again."); }
+    finally { setBusy(false); }
   }
   async function submit(mode: "in" | "up") {
     if (!password || (mode === "in" ? !identifier.trim() : !email.trim()))
@@ -83,6 +111,7 @@ function Auth() {
     if (mode === "up" && (!Number.isInteger(declaredAge) || declaredAge < 18 || declaredAge > 100))
       return Alert.alert("Check age", "Nook currently supports adults aged 18–100.");
     setBusy(true);
+    try {
     let error: any = null;
     if (mode === "in") {
       const result = await supabase.functions.invoke("username-login", {
@@ -111,6 +140,8 @@ function Auth() {
         "Check your email",
         "Confirm your address, then return to Nook.",
       );
+    } catch { Alert.alert("Could not continue", "Check your connection and try again."); }
+    finally { setBusy(false); }
   }
   return (
     <SafeAreaView style={s.safe}>

@@ -87,3 +87,7 @@ Verify the complete two-phone signup, group join and host-approval flow on physi
 ## Store builds (1.3.0)
 
 Shared phone layout handles safe areas, form keyboards, larger text discovery cards and accessible bottom navigation. Production Android AAB and iOS profiles are in `eas.json`. See [store release handoff](docs/STORE_RELEASE.md) for signing, submission blockers and device acceptance. Store submission and physical phone testing are still pending.
+
+## Audit fixes (1.3.1)
+
+Account-isolated local storage, discovery loading, connection inbox, reminder cleanup and database permission fixes are implemented. See [audit fixes and rollout order](docs/AUDIT_FIXES.md) before distributing this version. Hosted SQL/Edge Function rollout and physical phone testing remain pending. Run `npm test` for the regression checks.

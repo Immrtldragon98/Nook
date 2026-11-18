@@ -1,4 +1,6 @@
 import { supabase } from "./supabase";
+import type { LocalProfile } from "./database";
+import { clearPlanReminders } from "./notifications";
 
 export type CloudGroup = {
   id: string;
@@ -43,7 +45,7 @@ export type ModerationCase = {
 
 export async function listCloudPlans(city: string, limit = 50) {
   const { data, error } = await supabase.from("plans").select("*")
-    .eq("city", city).order("created_at", { ascending: false }).limit(limit);
+    .eq("city", city).gt("starts_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(limit);
   if (error) throw error;
   return (data ?? []) as CloudPlan[];
 }
@@ -90,7 +92,7 @@ export async function listMyHostedPlanRequests() {
 }
 
 export async function decideCloudPlanRequest(planId:string,userId:string,status:"approved"|"rejected") {
-  const { error } = await supabase.from("plan_requests").update({status,updated_at:new Date().toISOString()}).eq("plan_id",planId).eq("user_id",userId);
+  const { error } = await supabase.from("plan_requests").update({status,updated_at:new Date().toISOString()}).eq("plan_id",planId).eq("user_id",userId).select("plan_id").single();
   if (error) throw error;
 }
 
@@ -136,9 +138,7 @@ export async function createConnectionQrToken() {
 export async function requestCloudConnection(tokenId: string, addresseeId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sign in required");
-  const { error } = await supabase.from("connections").insert({
-    requester_id: user.id, addressee_id: addresseeId, token_id: tokenId, status: "pending",
-  });
+  const { error } = await supabase.rpc("request_connection", { qr_token:tokenId, expected_owner:addresseeId });
   if (error) throw error;
 }
 
@@ -158,6 +158,7 @@ export async function initializeCloudIdentity(profile: {
   zone: string;
   languages: string;
   interests: string;
+  bio?: string;
 }) {
   const {
     data: { user },
@@ -177,7 +178,7 @@ export async function initializeCloudIdentity(profile: {
       .map((x) => x.trim())
       .filter(Boolean),
   };
-  const profileResult = await supabase.from("profiles").upsert(profileRow);
+  const profileResult = await supabase.from("profiles").update({ display_name:profileRow.display_name, city:profileRow.city, area:profileRow.area, languages:profileRow.languages, interests:profileRow.interests, ...(profile.bio !== undefined ? {bio:profile.bio.trim().slice(0,160)} : {}) }).eq("id", user.id).select("id").single();
   if (profileResult.error) throw profileResult.error;
   const trustResult = await supabase.from("trust_assertions").insert({
     user_id: user.id,
@@ -259,7 +260,7 @@ export async function decideCloudMembership(
     .from("memberships")
     .update({ status })
     .eq("group_id", groupId)
-    .eq("user_id", userId);
+    .eq("user_id", userId).select("group_id").single();
   if (error) throw error;
 }
 export async function submitCloudSafetyRating(groupId: string, rating: number) {
@@ -287,6 +288,7 @@ export async function currentCloudUserId() {
 }
 export async function getCloudAccountSummary(signOut = false) {
   if (signOut) {
+    await clearPlanReminders();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     return null as never;
@@ -296,7 +298,7 @@ export async function getCloudAccountSummary(signOut = false) {
   if (!user) throw new Error("Sign in required");
   const [profileResult, trustResult] = await Promise.all([
     supabase.from("profiles").select("username,bio,avatar_url").eq("id", user.id).maybeSingle(),
-    supabase.from("trust_assertions").select("face_verified,attended_plans").eq("user_id", user.id).maybeSingle(),
+    supabase.from("trust_assertions").select("adult_verified,face_verified,attended_plans,restricted_until").eq("user_id", user.id).maybeSingle(),
   ]);
   if (profileResult.error) throw profileResult.error;
   if (trustResult.error) throw trustResult.error;
@@ -307,6 +309,7 @@ export async function getCloudAccountSummary(signOut = false) {
     gender: user.user_metadata?.gender ?? "prefer_not_to_say",
     age: Number(user.user_metadata?.declared_age) || null,
     faceVerified: !!trustResult.data?.face_verified,
+    tripEligible: !!trustResult.data?.adult_verified && !!trustResult.data?.face_verified && (trustResult.data?.attended_plans ?? 0) >= 3 && (!trustResult.data?.restricted_until || new Date(trustResult.data.restricted_until).getTime() < Date.now()),
     attendedPlans: trustResult.data?.attended_plans ?? 0,
     bio: profileResult.data?.bio ?? "",
     avatarPath: profileResult.data?.avatar_url ?? "",
@@ -345,11 +348,16 @@ export async function getPrivateAvatarUrl(path: string) {
   return data.signedUrl;
 }
 
-export async function deleteMyCloudAccount() {
-  const { error } = await supabase.functions.invoke("delete-account", { method: "POST" });
+export async function deleteMyCloudAccount(clearLocalData:()=>Promise<void>) {
+  const { data, error } = await supabase.functions.invoke("delete-account", { method: "POST" });
   if (error) throw error;
-  const { error: signOutError } = await supabase.auth.signOut();
-  if (signOutError) throw signOutError;
+  if (!data?.ok) throw new Error("Account deletion was not confirmed");
+  try { await clearLocalData(); }
+  finally {
+    await clearPlanReminders().catch(() => {});
+    const { error: signOutError } = await supabase.auth.signOut({ scope:"local" });
+    if (signOutError) throw signOutError;
+  }
 }
 
 export async function blockCloudUser(blockedId: string) {
@@ -415,4 +423,38 @@ export function watchCloudPlans(onChange: () => void) {
     "postgres_changes", { event: "*", schema: "public", table: "plans" }, onChange,
   ).subscribe();
   return () => { supabase.removeChannel(channel); };
+}
+
+
+export async function getCloudLocalProfile(userId:string): Promise<Omit<LocalProfile,"id"|"account_code">|null> {
+  const { data,error } = await supabase.from("profiles").select("display_name,city,area,languages,interests,bio").eq("id",userId).single();
+  if (error) throw error;
+  if (!data || data.city === "Not set" || data.area === "Not set") return null;
+  return { name:data.display_name,city:data.city,zone:data.area,languages:data.languages.join(", "),interests:data.interests.join(", "),bio:data.bio || "" };
+}
+
+export async function listPlanAvailability(ids:string[]) {
+  if (!ids.length) return new Map<string,number>();
+  const { data,error } = await supabase.rpc("plan_availability", { plan_ids:ids });
+  if (error) throw error;
+  return new Map<string,number>((data ?? []).map((r:{plan_id:string;remaining:number}) => [r.plan_id,r.remaining]));
+}
+
+export async function listCloudConnections() {
+  const userId = await currentCloudUserId();
+  if (!userId) throw new Error("Sign in required");
+  const {data,error} = await supabase.from("connections").select("requester_id,addressee_id,status,created_at").order("created_at",{ascending:false});
+  if (error) throw error;
+  const ids = [...new Set((data ?? []).map((r) => r.requester_id === userId ? r.addressee_id : r.requester_id))];
+  const profiles = ids.length ? await supabase.from("profiles").select("id,display_name").in("id",ids) : {data:[],error:null};
+  if (profiles.error) throw profiles.error;
+  return (data ?? []).map((r) => ({...r,incoming:r.addressee_id === userId,displayName:profiles.data?.find((p)=>p.id === (r.requester_id === userId ? r.addressee_id : r.requester_id))?.display_name ?? "Nook member"}));
+}
+
+export async function replyCloudConnection(requesterId:string,status:"accepted"|"blocked") {
+  const userId = await currentCloudUserId();
+  if (!userId) throw new Error("Sign in required");
+  const {data,error} = await supabase.from("connections").update({status}).eq("requester_id",requesterId).eq("addressee_id",userId).eq("status","pending").select("requester_id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("This request has already changed. Refresh connections.");
 }

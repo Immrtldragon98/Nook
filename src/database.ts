@@ -153,3 +153,14 @@ export async function savePlan(db: SQLiteDatabase, plan: Omit<StoredPlan, 'id'|'
     });
   } finally { await statement.finalizeAsync(); }
 }
+
+
+/** Remove this signed-in account's cache after confirmed server deletion. */
+export async function clearLocalAccountData(db:SQLiteDatabase) {
+  await db.execAsync(`BEGIN IMMEDIATE;
+    DELETE FROM host_requests; DELETE FROM owned_groups; DELETE FROM group_memberships;
+    DELETE FROM group_moderation; DELETE FROM groups; DELETE FROM connections;
+    DELETE FROM plans; DELETE FROM local_profile;
+    UPDATE local_settings SET gender='prefer_not_to_say' WHERE id=1;
+    COMMIT;`);
+}
