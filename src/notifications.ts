@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
+import { desiredReminders, REMINDER_PREFIX, type ReminderPlan } from "./reminderPolicy";
 
 const CHANNEL_ID = "plan-reminders";
 
@@ -56,11 +57,28 @@ export async function scheduleApprovedPlanReminder(plan: { id: string; title: st
   return true;
 }
 
-export async function syncApprovedPlanReminders(plans: Array<{ id: string; title: string; area: string; starts_at: string; requestStatus: string }>) {
-  if (!(await notificationPermissionGranted())) return 0;
-  let scheduled = 0;
-  for (const plan of plans.filter((item) => item.requestStatus === "approved")) {
-    if (await scheduleApprovedPlanReminder(plan)) scheduled += 1;
-  }
-  return scheduled;
+// Serialize reconciliation and logout cleanup so an in-flight sync cannot
+// recreate notifications after the account has been signed out.
+let reminderQueue: Promise<unknown> = Promise.resolve();
+function enqueue<T>(operation:()=>Promise<T>):Promise<T> {
+  const next = reminderQueue.catch(()=>{}).then(operation);
+  reminderQueue = next;
+  return next;
+}
+export function clearPlanReminders() {
+  return enqueue(async () => {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(scheduled.filter((n)=>n.identifier.startsWith(REMINDER_PREFIX)).map((n)=>Notifications.cancelScheduledNotificationAsync(n.identifier)));
+  });
+}
+export function syncApprovedPlanReminders(plans:ReminderPlan[]) {
+  return enqueue(async () => {
+    const desired = await notificationPermissionGranted() ? desiredReminders(plans) : [];
+    const ids = new Set(desired.map((p)=>`${REMINDER_PREFIX}${p.id}`));
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(scheduled.filter((n)=>n.identifier.startsWith(REMINDER_PREFIX) && !ids.has(n.identifier)).map((n)=>Notifications.cancelScheduledNotificationAsync(n.identifier)));
+    let count = 0;
+    for (const plan of desired) if (await scheduleApprovedPlanReminder(plan)) count += 1;
+    return count;
+  });
 }

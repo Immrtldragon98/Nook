@@ -9,6 +9,7 @@ const headers = {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers });
+  if (req.method !== "POST") return new Response(JSON.stringify({error:"Method not allowed"}), {status:405,headers});
   try {
     const authorization = req.headers.get("Authorization") ?? "";
     const url = Deno.env.get("SUPABASE_URL")!;
@@ -16,12 +17,14 @@ Deno.serve(async (req: Request) => {
     const { data: { user }, error: identityError } = await caller.auth.getUser();
     if (identityError || !user) return new Response(JSON.stringify({ error: "Sign in required" }), { status: 401, headers });
     const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { error: plansError } = await admin.from("plans").delete().eq("creator_id", user.id);
-    if (plansError) throw plansError;
-    const { error: groupsError } = await admin.from("groups").delete().eq("host_id", user.id);
-    if (groupsError) throw groupsError;
-    const { data: avatarFiles } = await admin.storage.from("avatars").list(user.id);
-    if (avatarFiles?.length) await admin.storage.from("avatars").remove(avatarFiles.map((file) => `${user.id}/${file.name}`));
+    // User-owned database content is removed atomically by the auth deletion
+    // trigger. Do not delete plans/groups in separate requests before this.
+    const { data: avatarFiles, error: listError } = await admin.storage.from("avatars").list(user.id, { limit:100 });
+    if (listError) throw listError;
+    if (avatarFiles?.length) {
+      const { error: storageError } = await admin.storage.from("avatars").remove(avatarFiles.map((file) => `${user.id}/${file.name}`));
+      if (storageError) throw storageError;
+    }
     const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
     if (deleteError) throw deleteError;
     return new Response(JSON.stringify({ ok: true }), { headers });
