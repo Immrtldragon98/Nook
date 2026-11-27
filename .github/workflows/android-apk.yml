@@ -10,6 +10,8 @@ on:
       - "package.json"
       - "package-lock.json"
       - "src/**"
+      - "tests/**"
+      - "supabase/**"
       - "assets/**"
       - ".github/workflows/android-apk.yml"
 
@@ -38,6 +40,8 @@ jobs:
         run: npm ci
       - name: Validate TypeScript
         run: npm run check
+      - name: Regression checks
+        run: npm test
       - name: Generate Android project
         run: npx expo prebuild --platform android --no-install --clean
       - name: Build standalone APK with bundled JavaScript

@@ -1,8 +1,9 @@
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { SafeAreaView, ScrollView } from "./src/mobile";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  AppState,
   BackHandler,
   Image,
   StatusBar,
@@ -18,6 +19,7 @@ import { Camera, CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import * as Crypto from "expo-crypto";
 import {
+  clearLocalAccountData,
   addPendingConnection,
   addTestHostRequest,
   clearGroupReview,
@@ -52,6 +54,10 @@ import { AuthGate } from "./src/AuthGate";
 import { enablePlanNotifications, notificationPermissionGranted, syncApprovedPlanReminders } from "./src/notifications";
 import { cloudEnabled, supabase } from "./src/supabase";
 import {
+  getCloudLocalProfile,
+  listCloudConnections,
+  replyCloudConnection,
+  listPlanAvailability,
   createCloudGroup,
   createCloudPlan,
   createConnectionQrToken,
@@ -264,15 +270,14 @@ const canUseTrips =
   !USER_TRUST.hasActiveRestriction;
 
 export default function App() {
-  const app = (
-    <SQLiteProvider databaseName="nook.db" onInit={migrateDatabase}>
-      <Nook />
+  return <SafeAreaProvider><AuthGate>{(userId) => (
+    <SQLiteProvider key={userId} databaseName={`nook-${userId}.db`} onInit={migrateDatabase}>
+      <Nook userId={userId} />
     </SQLiteProvider>
-  );
-  return <SafeAreaProvider>{cloudEnabled ? <AuthGate>{app}</AuthGate> : app}</SafeAreaProvider>;
+  )}</AuthGate></SafeAreaProvider>;
 }
 
-function Nook() {
+function Nook({ userId }: { userId: string }) {
   const db = useSQLiteContext();
   const [tab, setTab] = useState<Tab>("Discover");
   const [selectedPlan, setSelectedPlan] = useState<Hangout | null>(null);
@@ -283,39 +288,54 @@ function Nook() {
     undefined,
   );
   async function refreshPlans() {
+    if (!profile?.city) return;
     try {
-      const rows = await listCloudPlans(profile?.city ?? "");
+      const rows = await listCloudPlans(profile.city);
+      const availability = await listPlanAvailability(rows.map((p) => p.id));
       setLocalPlans(rows.map((p) => ({ id:p.id, emoji:p.trusted_only?"🧳":"✨", category:p.category,
-        title:p.title, area:p.area, time:formatPlanTime(p.starts_at), host:"Nook member", spots:p.spots,
+        title:p.title, area:p.area, time:formatPlanTime(p.starts_at), host:"Nook member", spots:availability.get(p.id) ?? 0,
         language:p.language, audience:p.trusted_only?"Trusted members only":"Open plan", safety:0,
         trustedOnly:p.trusted_only, creatorId:p.creator_id })));
     } catch {
-      const rows = await listPlans(db);
-      setLocalPlans(rows.map(toHangout));
+      setLocalPlans([]);
+      Alert.alert("Could not load activities", "Check your connection and try again.");
     }
   }
   useEffect(() => {
-    refreshPlans().catch(() =>
-      Alert.alert(
-        "Storage error",
-        "Could not load plans stored on this phone.",
-      ),
-    );
-    getProfile(db)
-      .then(setProfile)
-      .catch(() => setProfile(null));
-  }, []);
-  useEffect(() => cloudEnabled ? watchCloudPlans(() => refreshPlans().catch(() => {})) : undefined,
-    [profile?.city]);
+    let active = true;
+    (async () => {
+      const remote = await getCloudLocalProfile(userId);
+      if (remote) await saveProfile(db, remote);
+      const local = await getProfile(db);
+      if (active) setProfile(remote ? await getProfile(db) : local);
+    })().catch(async () => {
+      const local = await getProfile(db).catch(() => null);
+      if (active) setProfile(local);
+    });
+    return () => { active = false; };
+  }, [db, userId]);
   useEffect(() => {
-    if (profile && cloudEnabled)
-      initializeCloudIdentity(profile).catch(() =>
-        Alert.alert(
-          "Profile sync pending",
-          "Your local profile is safe. Nook will retry cloud sync when you open Groups.",
-        ),
-      );
-  }, [profile]);
+    if (!profile?.city) return;
+    refreshPlans();
+    return watchCloudPlans(() => { refreshPlans(); });
+  }, [profile?.city]);
+  useEffect(() => {
+    let active = true;
+    let revision = 0;
+    async function reconcile() {
+      const current = ++revision;
+      try {
+        const requests = await listMyCloudPlanRequests();
+        if (active && current === revision) await syncApprovedPlanReminders(requests.filter((r)=>r.plan).map((r)=>({...r.plan,requestStatus:r.status})));
+      } catch { /* Keep the last schedule until the next successful server sync. */ }
+    }
+    reconcile();
+    const channel = supabase.channel(`reminders-${userId}`)
+      .on("postgres_changes",{event:"*",schema:"public",table:"plan_requests",filter:`user_id=eq.${userId}`},()=>{ reconcile(); })
+      .on("postgres_changes",{event:"*",schema:"public",table:"plans"},()=>{ reconcile(); }).subscribe();
+    const state = AppState.addEventListener("change",(next)=>{ if(next === "active") reconcile(); });
+    return () => { active = false; state.remove(); supabase.removeChannel(channel); };
+  }, [userId]);
   useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (selectedPlan) { setSelectedPlan(null); return true; }
@@ -516,15 +536,19 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
   const [budget, setBudget] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  useEffect(() => { getProfile(db).then(setProfile); }, []);
+  const [tripEligible, setTripEligible] = useState(false);
+  useEffect(() => {
+    getProfile(db).then(setProfile).catch(() => {});
+    getCloudAccountSummary().then((a) => setTripEligible(a.tripEligible)).catch(() => {});
+  }, []);
   async function submit() {
     const startsAt = toPlanIso(day, time);
-    if (!title.trim() || !area.trim() || !startsAt)
+    if (title.trim().length < 3 || title.trim().length > 80 || !area.trim() || !startsAt)
       return Alert.alert(
         "Complete the plan",
-        "Add an activity, area, and date/time.",
+        "Add an activity title of 3–80 characters, area, and date/time.",
       );
-    if (kind === "trip" && !canUseTrips)
+    if (kind === "trip" && !tripEligible)
       return Alert.alert(
         "Trips are locked",
         "Complete verification and attend three local plans first.",
@@ -539,10 +563,10 @@ function CreateHub({ onCreated }: { onCreated: () => Promise<void> }) {
     try {
       if (!profile) throw new Error("Profile unavailable");
       await createCloudPlan({
-        title,
+        title:title.trim(),
         category: kind === "trip" ? "Trips" : kind === "dine" ? "Dine out" : kind === "event" ? "Events" : "New in city",
         city: profile.city,
-        area,
+        area:area.trim(),
         starts_at: startsAt,
         language,
         spots: count,
@@ -762,7 +786,6 @@ function CloudGroups({ profile }: { profile: LocalProfile }) {
   const [womenOnly, setWomenOnly] = useState(false);
   const [trustedOnly, setTrustedOnly] = useState(false);
   async function refresh() {
-    await initializeCloudIdentity(profile);
     setUserId(await currentCloudUserId());
     setGroups(await listCloudGroups(profile.city));
   }
@@ -1436,13 +1459,14 @@ function Toggle({
 function ActivityDetail({ plan, onClose, onRequested }: { plan: Hangout; onClose: () => void; onRequested: (id: number | string) => void }) {
   const [host, setHost] = useState(plan.host);
   const [busy, setBusy] = useState(false);
-  const [trust, setTrust] = useState<{faceVerified:boolean;attendedPlans:number}|null>(null);
+  const [trust, setTrust] = useState<{faceVerified:boolean;attendedPlans:number;tripEligible:boolean}|null>(null);
   useEffect(() => {
-    getCloudAccountSummary().then((a) => setTrust({faceVerified:a.faceVerified,attendedPlans:a.attendedPlans})).catch(() => {});
+    getCloudAccountSummary().then((a) => setTrust({faceVerified:a.faceVerified,attendedPlans:a.attendedPlans,tripEligible:a.tripEligible})).catch(() => {});
     if (plan.creatorId) getCloudPlanHost(plan.creatorId).then((p) => p?.display_name && setHost(p.display_name)).catch(() => {});
   }, [plan.id]);
-  const eligible = !plan.trustedOnly || (!!trust?.faceVerified && trust.attendedPlans >= 3);
+  const eligible = !plan.trustedOnly || !!trust?.tripEligible;
   async function request() {
+    if (plan.spots <= 0) return Alert.alert("Activity full", "No places remain for this activity.");
     if (!eligible) return Alert.alert("Trusted activity", "Complete face approval and attend three local activities first.");
     setBusy(true);
     try {
@@ -1487,10 +1511,18 @@ function Plans({ joined, onBrowse }: { joined: (number | string)[]; onBrowse: ()
   const [notifications, setNotifications] = useState<any[]>([]);
   const [remindersEnabled, setRemindersEnabled] = useState(false);
   async function refreshRequests() { const [mine, hosted, alerts] = await Promise.all([listMyCloudPlanRequests(),listMyHostedPlanRequests(),listMyNotifications()]); setCloudRequests(mine); setHostRequests(hosted); setNotifications(alerts); }
-  useEffect(() => { notificationPermissionGranted().then(setRemindersEnabled).catch(() => {}); refreshRequests().catch(() => {}); return watchMyNotifications(() => refreshRequests().catch(() => {})); }, [joined]);
+  useEffect(() => { notificationPermissionGranted().then(setRemindersEnabled).catch(() => {}); refreshRequests().catch(() => Alert.alert("Could not load plans", "Check your connection and reopen My Plans.")); return watchMyNotifications(() => refreshRequests().catch(() => {})); }, [joined]);
+  async function decide(planId:string,userId:string,status:"approved"|"rejected") {
+    try { await decideCloudPlanRequest(planId,userId,status); await refreshRequests(); }
+    catch (error:any) { Alert.alert("Could not update request",error.message || "Please try again."); }
+  }
+  async function readAlerts() {
+    try { await markNotificationsRead(notifications.filter((n)=>!n.read_at).map((n)=>n.id)); await refreshRequests(); }
+    catch { Alert.alert("Could not mark updates read", "Please try again."); }
+  }
   const plans = hangouts.filter((h) => joined.includes(h.id));
   const cloudPlans = cloudRequests.filter((r) => r.plan).map((r) => ({...r.plan, requestStatus:r.status}));
-  useEffect(() => { if (remindersEnabled) syncApprovedPlanReminders(cloudPlans).catch(() => {}); }, [remindersEnabled, cloudRequests]);
+
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <Text style={styles.h1}>My plans</Text>
@@ -1500,13 +1532,13 @@ function Plans({ joined, onBrowse }: { joined: (number | string)[]; onBrowse: ()
       <View style={styles.reminderCard}>
         <View style={styles.reminderIcon}><Text style={styles.reminderIconText}>🔔</Text></View>
         <View style={{flex:1}}><Text style={styles.alertTitle}>Plan reminders</Text><Text style={styles.meta}>{remindersEnabled ? "Android will remind you 2 hours before approved activities." : "Enable private reminders on this phone."}</Text></View>
-        {!remindersEnabled && <TouchableOpacity style={styles.reminderButton} onPress={async()=>{const enabled=await enablePlanNotifications();setRemindersEnabled(enabled);if(!enabled) Alert.alert("Notifications are off","You can enable Nook notifications later from Android settings.");}}><Text style={styles.reminderButtonText}>Enable</Text></TouchableOpacity>}
+        {!remindersEnabled && <TouchableOpacity style={styles.reminderButton} onPress={async()=>{const enabled=await enablePlanNotifications();setRemindersEnabled(enabled);if(enabled) await syncApprovedPlanReminders(cloudPlans);if(!enabled) Alert.alert("Notifications are off","You can enable Nook notifications later from Android settings.");}}><Text style={styles.reminderButtonText}>Enable</Text></TouchableOpacity>}
       </View>
       {notifications.length > 0 && <View style={styles.alertPanel}>
-        <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Updates</Text>{notifications.some((n) => !n.read_at) && <TouchableOpacity onPress={async()=>{await markNotificationsRead(notifications.filter((n)=>!n.read_at).map((n)=>n.id));await refreshRequests();}}><Text style={styles.alertAction}>Mark read</Text></TouchableOpacity>}</View>
+        <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Updates</Text>{notifications.some((n) => !n.read_at) && <TouchableOpacity onPress={readAlerts}><Text style={styles.alertAction}>Mark read</Text></TouchableOpacity>}</View>
         {notifications.slice(0,4).map((n) => <View key={n.id} style={[styles.alertRow, !n.read_at && styles.alertUnread]}><Text style={styles.alertIcon}>{n.kind === "plan_request" ? "👋" : n.kind === "plan_approved" ? "✓" : "•"}</Text><View style={{flex:1}}><Text style={styles.alertTitle}>{n.title}</Text><Text style={styles.meta}>{n.body}</Text></View></View>)}
       </View>}
-      {hostRequests.length > 0 && <><Text style={styles.sectionTitle}>Requests to your activities</Text>{hostRequests.map((r) => <View key={`${r.plan_id}-${r.user_id}`} style={styles.memberRow}><Text style={styles.kindTitle}>{r.displayName}</Text><Text style={styles.meta}>{r.plan?.title} · {r.status}</Text>{r.status === "pending" && <View style={styles.memberActions}><TouchableOpacity style={styles.approveButton} onPress={async()=>{await decideCloudPlanRequest(r.plan_id,r.user_id,"approved");await refreshRequests();}}><Text style={styles.primaryText}>Approve</Text></TouchableOpacity><TouchableOpacity style={styles.miniButton} onPress={async()=>{await decideCloudPlanRequest(r.plan_id,r.user_id,"rejected");await refreshRequests();}}><Text style={styles.editText}>Reject</Text></TouchableOpacity></View>}</View>)}</>}
+      {hostRequests.length > 0 && <><Text style={styles.sectionTitle}>Requests to your activities</Text>{hostRequests.map((r) => <View key={`${r.plan_id}-${r.user_id}`} style={styles.memberRow}><Text style={styles.kindTitle}>{r.displayName}</Text><Text style={styles.meta}>{r.plan?.title} · {r.status}</Text>{r.status === "pending" && <View style={styles.memberActions}><TouchableOpacity style={styles.approveButton} onPress={()=>decide(r.plan_id,r.user_id,"approved")}><Text style={styles.primaryText}>Approve</Text></TouchableOpacity><TouchableOpacity style={styles.miniButton} onPress={()=>decide(r.plan_id,r.user_id,"rejected")}><Text style={styles.editText}>Reject</Text></TouchableOpacity></View>}</View>)}</>}
       {(plans.length > 0 || cloudPlans.length > 0) && <Text style={styles.sectionTitle}>Your requests</Text>}
       {plans.length || cloudPlans.length ? (<>
         {cloudPlans.map((h) => <View key={h.id} style={styles.card}><Text style={styles.cardTitle}>{h.trusted_only ? "🧳" : "✨"} {h.title}</Text><Text style={styles.meta}>{formatPlanTime(h.starts_at)} · {h.area}</Text><View style={styles.pending}><Text style={styles.pendingText}>{h.requestStatus === "pending" ? "Waiting for host approval" : h.requestStatus}</Text></View></View>)}
@@ -1544,11 +1576,24 @@ function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
   const [languages, setLanguages] = useState("English");
   const [interests, setInterests] = useState("");
   const [bio, setBio] = useState("");
+  useEffect(() => {
+    getProfile(db).then((p) => {
+      if (!p) return;
+      setName(p.name); setCity(p.city); setZone(p.zone);
+      setLanguages(p.languages); setInterests(p.interests); setBio(p.bio);
+    }).catch(() => {});
+  }, [db]);
   async function submit() {
     if (!name.trim() || !zone.trim() || !interests.trim())
       return Alert.alert("Almost there", "Add your name, area and interests.");
-    await saveProfile(db, { name, city, zone, languages, interests, bio });
-    await onDone();
+    if (name.trim().length < 2 || name.trim().length > 40 || !city.trim() || !languages.trim())
+      return Alert.alert("Check profile", "Use a name of 2–40 characters and add a city and language.");
+    try {
+      const details = { name:name.trim(), city:city.trim(), zone:zone.trim(), languages:languages.trim(), interests:interests.trim(), bio:bio.trim() };
+      await initializeCloudIdentity(details);
+      await saveProfile(db, details);
+      await onDone();
+    } catch { Alert.alert("Could not save profile", "Check your connection and try again."); }
   }
   return (
     <SafeAreaView style={styles.safe}>
@@ -1787,6 +1832,7 @@ function Profile({
         <TrustRow icon="☎" title="Phone number" value="Not collected" done={false} />
         <TrustRow icon="✓" title="Trusted trip access" value={`${account?.attendedPlans ?? 0}/3 plans`} done={(account?.attendedPlans ?? 0) >= 3} last />
       </View>
+      <ConnectionInbox />
       <Text style={styles.sectionTitle}>Account & privacy</Text>
       <View style={styles.accountPanel}>
         <Text style={styles.accountLabel}>SIGNED IN AS</Text>
@@ -1799,17 +1845,51 @@ function Profile({
         <TouchableOpacity disabled={saving} onPress={saveNewPassword} style={styles.primaryWide}><Text style={styles.primaryText}>{saving ? "Saving…" : "Update password"}</Text></TouchableOpacity>
         <TouchableOpacity onPress={()=>{setChangingPassword(false);setNewPassword("");}} style={styles.signOutButton}><Text style={styles.editText}>Cancel</Text></TouchableOpacity>
       </View> : <TouchableOpacity onPress={()=>setChangingPassword(true)} style={styles.editButton}><Text style={styles.editText}>Change password</Text></TouchableOpacity>}
+      <TouchableOpacity onPress={onEdit} style={styles.editButton}><Text style={styles.editText}>Edit name, city & interests</Text></TouchableOpacity>
       <TouchableOpacity onPress={()=>setEditing(true)} style={styles.editButton}><Text style={styles.editText}>Edit photo & bio</Text></TouchableOpacity>
       <TouchableOpacity onPress={() => setMode("safety")} style={styles.safetyCentreButton}><Text style={styles.safetyCentreText}>Safety, privacy & community rules</Text></TouchableOpacity>
       {moderator && <TouchableOpacity onPress={() => setMode("moderation")} style={styles.moderatorButton}><Text style={styles.moderatorButtonText}>Open moderator case queue</Text></TouchableOpacity>}
-      <TouchableOpacity onPress={() => Alert.alert("Delete Nook account?", "This permanently removes your profile, plans, QR connections and private photo. It cannot be undone.", [{text:"Cancel",style:"cancel"},{text:"Delete account",style:"destructive",onPress:()=>deleteMyCloudAccount().catch(()=>Alert.alert("Could not delete account", "Please check your connection and try again."))}])} style={styles.deleteButton}>
+      <TouchableOpacity onPress={() => Alert.alert("Delete Nook account?", "This permanently removes your profile, plans, QR connections and private photo. It cannot be undone.", [{text:"Cancel",style:"cancel"},{text:"Delete account",style:"destructive",onPress:()=>deleteMyCloudAccount(()=>clearLocalAccountData(db)).catch(()=>Alert.alert("Could not delete account", "Please check your connection and try again."))}])} style={styles.deleteButton}>
         <Text style={styles.deleteText}>Delete account and data</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => Alert.alert("Sign out?", "Your local profile stays on this phone.", [{text:"Cancel",style:"cancel"},{text:"Sign out",style:"destructive",onPress:()=>getCloudAccountSummary(true)}])} style={styles.signOutButton}>
+      <TouchableOpacity onPress={() => Alert.alert("Sign out?", "Your local profile stays on this phone.", [{text:"Cancel",style:"cancel"},{text:"Sign out",style:"destructive",onPress:()=>getCloudAccountSummary(true).catch(()=>Alert.alert("Could not sign out", "Please try again."))}])} style={styles.signOutButton}>
         <Text style={styles.signOutText}>Sign out</Text>
       </TouchableOpacity>
     </ScrollView>
   );
+}
+
+function ConnectionInbox() {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof listCloudConnections>>>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function refresh() {
+    try { setRows(await listCloudConnections()); setError(""); }
+    catch { setError("Could not load connections. Tap refresh to retry."); }
+  }
+  useEffect(() => {
+    refresh();
+    const channel = supabase.channel("connection-inbox").on("postgres_changes", {event:"*",schema:"public",table:"connections"}, () => { refresh(); }).subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+  async function reply(requesterId:string, status:"accepted"|"blocked") {
+    setBusy(true);
+    try { await replyCloudConnection(requesterId,status); await refresh(); }
+    catch (e:any) { Alert.alert("Could not update connection",e.message || "Please try again."); }
+    finally { setBusy(false); }
+  }
+  return <View style={styles.detailCard}>
+    <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Connections</Text><TouchableOpacity onPress={refresh}><Text style={styles.editText}>Refresh</Text></TouchableOpacity></View>
+    {!!error && <Text style={styles.meta}>{error}</Text>}
+    {!rows.length && !error && <Text style={styles.meta}>Scan a QR after meeting to send a request.</Text>}
+    {rows.map((r) => <View key={`${r.requester_id}-${r.addressee_id}`} style={styles.memberRow}>
+      <Text style={styles.kindTitle}>{r.displayName}</Text><Text style={styles.meta}>{r.incoming ? "Incoming" : "Outgoing"} · {r.status === "blocked" ? "Declined" : r.status}</Text>
+      {r.incoming && r.status === "pending" && <View style={styles.memberActions}>
+        <TouchableOpacity disabled={busy} style={styles.approveButton} onPress={()=>reply(r.requester_id,"accepted")}><Text style={styles.primaryText}>Accept</Text></TouchableOpacity>
+        <TouchableOpacity disabled={busy} style={styles.miniButton} onPress={()=>reply(r.requester_id,"blocked")}><Text style={styles.editText}>Decline</Text></TouchableOpacity>
+      </View>}
+    </View>)}
+  </View>;
 }
 
 function ModeratorDesk({ onClose }: { onClose: () => void }) {
@@ -1867,12 +1947,14 @@ function QRScanner({
   const db = useSQLiteContext();
   const [permission, requestPermission] = useCameraPermissions();
   const [locked, setLocked] = useState(false);
+  const scanLock = useRef(false);
+  function unlock() { scanLock.current = false; setLocked(false); }
   async function scanFromGallery() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"], allowsEditing: false, quality: 1,
     });
     if (result.canceled) return;
-    setLocked(false);
+    unlock();
     try {
       const codes = await Camera.scanFromURLAsync(result.assets[0].uri, ["qr"]);
       if (!codes.length) throw new Error("empty");
@@ -1882,7 +1964,8 @@ function QRScanner({
     }
   }
   async function scanned({ data }: { data: string }) {
-    if (locked) return;
+    if (scanLock.current) return;
+    scanLock.current = true;
     setLocked(true);
     try {
       const p = JSON.parse(data);
@@ -1894,30 +1977,33 @@ function QRScanner({
         !p.exp || !p.token || !p.userId
       )
         throw new Error("format");
-      if (p.account === ownCode)
+      if (p.userId === await currentCloudUserId())
         return Alert.alert(
           "That is your QR",
-          "Ask the other person to show theirs.",
+          "Ask the other person to show theirs.", [{text:"Try again",onPress:unlock}],
         );
       if (Date.now() > p.exp)
-        return Alert.alert("QR expired", "Ask them to generate a new QR.");
+        return Alert.alert("QR expired", "Ask them to generate a new QR.", [{text:"Try again",onPress:unlock}]);
       if (await hasCloudConnection(p.userId))
         return Alert.alert(
           "Already connected",
-          "This account is already on your phone.",
+          "A connection or request already exists.", [{text:"Try again",onPress:unlock}],
         );
       Alert.alert(
         `Connect with ${p.name}?`,
         "This creates a pending connection. No contact details will be shared.",
         [
-          { text: "Cancel", style: "cancel", onPress: () => setLocked(false) },
+          { text: "Cancel", style: "cancel", onPress: unlock },
           {
             text: "Add pending",
             onPress: async () => {
-              await requestCloudConnection(p.token, p.userId);
-              await addPendingConnection(db, p.account, p.name).catch(() => {});
-              Alert.alert("Connection requested", "They can see it from their own phone.");
-              onClose();
+              try {
+                await requestCloudConnection(p.token, p.userId);
+                Alert.alert("Connection requested", "They can accept it from Profile → Connections.");
+                onClose();
+              } catch (error:any) {
+                Alert.alert("Connection not sent", error.message || "Please try again.", [{text:"Try again",onPress:unlock}]);
+              }
             },
           },
         ],
@@ -1926,7 +2012,7 @@ function QRScanner({
       Alert.alert(
         "Not a Nook QR",
         "Ask the person to open their connection QR.",
-        [{ text: "Try again", onPress: () => setLocked(false) }],
+        [{ text: "Try again", onPress: unlock }],
       );
     }
   }
